@@ -63,4 +63,41 @@ final class TerminalSessionTests: XCTestCase {
         let plain = LaunchConfig.loginShell(workingDirectory: nil, baseEnvironment: ["SHELL": "/bin/zsh"])
         XCTAssertEqual(plain.arguments, ["-zsh"])
     }
+
+    /// Closing a pane must take down the agent running *under* the pane's
+    /// shell, not just the shell (panes run `zsh -l -c "claude; exec zsh -l"`).
+    func testTerminateKillsGrandchildProcess() throws {
+        let marker = "gater-kill-test-\(UUID().uuidString.prefix(8))"
+        let config = LaunchConfig.loginShell(command: "/bin/zsh -fc 'exec -a \(marker) sleep 300'", workingDirectory: nil,
+                                             baseEnvironment: ["SHELL": "/bin/zsh", "PATH": "/usr/bin:/bin"])
+        let session = try TerminalSession(config: config, size: size)
+        XCTAssertTrue(waitUntil { Self.isRunning(marker) }, "agent stand-in never started")
+        XCTAssertNotEqual(Self.pid(of: marker), session.process.pid, "stand-in must be a grandchild, not the shell")
+
+        session.terminate()
+        XCTAssertTrue(waitUntil { session.exitStatus != nil })
+        XCTAssertTrue(waitUntil { !Self.isRunning(marker) }, "agent stand-in survived terminate()")
+    }
+
+    private static func pid(of pattern: String) -> pid_t? {
+        let p = Process()
+        let out = Pipe()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        p.arguments = ["-f", "^" + pattern] // argv0 only, not shells quoting it
+        p.standardOutput = out
+        try? p.run()
+        p.waitUntilExit()
+        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        return text.split(separator: "\n").first.flatMap { pid_t($0) }
+    }
+
+    private static func isRunning(_ pattern: String) -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        p.arguments = ["-f", "^" + pattern] // argv0 only, not shells quoting it
+        p.standardOutput = FileHandle.nullDevice
+        try? p.run()
+        p.waitUntilExit()
+        return p.terminationStatus == 0
+    }
 }
