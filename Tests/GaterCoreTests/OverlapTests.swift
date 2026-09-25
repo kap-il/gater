@@ -48,7 +48,7 @@ final class OverlapDetectorTests: XCTestCase {
     /// The golden scenario: A changes getUser, B's own new file calls it.
     func testPublicSurfaceChangeUsedInOtherAgentsCode() throws {
         var detector = OverlapDetector()
-        _ = detector.apply(owned("src/users.ts#getUser", "Auth", "uncertain", 0.68), plan: plan)
+        _ = detector.apply(owned("src/users.ts#getUser", "Auth", "uncertain", 0.68), plan: plan) // node falls back to Auth anyway
         _ = detector.apply(changed("delegate-dash", "src/dashboard/UserCard.tsx", ["src/dashboard/UserCard.tsx#UserCard"]), plan: plan)
 
         let found = detector.apply(refs("src/users.ts#getUser", from: "delegate-auth", in: "delegate-dash",
@@ -65,6 +65,15 @@ final class OverlapDetectorTests: XCTestCase {
         XCTAssertEqual(detector.apply(refs("src/users.ts#getUser", from: "delegate-auth", in: "delegate-dash",
                                            ["src/dashboard/UserCard.tsx:4", "src/dashboard/UserCard.tsx:9"]), plan: plan).count,
                        1, "a new use is new information")
+    }
+
+    func testUncertainOwnerDoesNotNameTheNode() throws {
+        var detector = OverlapDetector()
+        _ = detector.apply(owned("src/users.ts#getUser", "Dashboard", "uncertain", 0.07), plan: plan)
+        let overlap = try XCTUnwrap(detector.apply(refs("src/users.ts#getUser", from: "delegate-auth", in: "delegate-dash",
+                                                        ["src/dashboard/UserCard.tsx:4"]), plan: plan).first)
+        XCTAssertEqual(overlap.feature, "Auth", "the changer's feature, not a 0.07 guess")
+        XCTAssertEqual(overlap.uncertain, ["src/users.ts#getUser": 0.07])
     }
 
     func testUsesInCodeTheOtherAgentNeverTouchedAreIgnored() {

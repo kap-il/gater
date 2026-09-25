@@ -156,10 +156,11 @@ public struct OverlapDetector {
         let owner = owners[symbol]
         var uncertain: [String: Double] = [:]
         if let owner, owner.status == "uncertain" { uncertain[symbol] = owner.confidence }
-        // The node is the symbol's owner; if Jev hasn't placed it in a
-        // feature, it's the feature of the work that changed it.
-        let feature = owner.map(\.feature).flatMap { $0 == "unassigned" ? nil : $0 }
-            ?? plan.currentDish(forPane: fromPane)?.feature ?? "unassigned"
+        // The node is the symbol's owner when Jev placed it confidently;
+        // otherwise it's the feature of the work that changed it (an
+        // uncertain 0.07 guess must not name the node — seen live).
+        let confidentOwner = owner.flatMap { $0.status == "assigned" && $0.feature != "unassigned" ? $0.feature : nil }
+        let feature = confidentOwner ?? plan.currentDish(forPane: fromPane)?.feature ?? "unassigned"
         return Overlap(key: key, kind: .publicSurface, feature: feature,
                        panes: [fromPane, inPane], symbol: symbol, change: event["change"]?.stringValue,
                        fromPane: fromPane, inPane: inPane, sites: relevant, uncertain: uncertain)

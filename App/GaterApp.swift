@@ -34,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let references = ReferenceEngine()
     /// Agent pane id → worktree, mirrored from PaneManager. symbolQueue only.
     private var agentWorktrees: [String: String] = [:]
+    /// Public-surface changes still in play: symbol id → the pane that
+    /// changed it and how. symbolQueue only.
+    private var surfaceChanges: [String: (pane: String?, change: String)] = [:]
     /// Overlap detection (spec §4.9). symbolQueue only.
     private var overlaps = OverlapDetector()
     private var reviewer: ConflictReviewer?
@@ -74,6 +77,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Rebuild occupancy and remember what was already reported.
         let history = (try? EventLog.replay(path: logPath)) ?? []
         overlaps.replay(history, plan: store.current)
+        for event in history where event.kind == "symbols_changed" {
+            for change in event.fields["changes"]?.arrayValue ?? [] {
+                guard let id = change.value(atPath: "id")?.stringValue,
+                      let kind = change.value(atPath: "change")?.stringValue,
+                      ["signature", "removed"].contains(kind),
+                      change.value(atPath: "exported") == .bool(true) else { continue }
+                surfaceChanges[id] = (event.pane, kind)
+            }
+        }
         for event in (try? EventLog.replay(path: logPath)) ?? [] where event.kind == "ownership" {
             if let id = event["symbol"]?.stringValue, let feature = event["feature"]?.stringValue {
                 ownership[id] = (feature, event["status"]?.stringValue ?? "assigned")
@@ -182,6 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self.classifyOwnership(update, absolutePath: path)
             self.findReferences(for: update, from: event.pane)
+            self.checkNewUses(in: update, absolutePath: path, by: event.pane)
         }
     }
 
@@ -295,11 +308,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The other direction: B edits code *after* A changed a symbol's
+    /// public surface. If B's file mentions a changed symbol, query B's
+    /// worktree for uses so the overlap isn't missed because of ordering.
+    /// Runs on symbolQueue.
+    private func checkNewUses(in update: SymbolUpdate, absolutePath: String, by pane: String?) {
+        guard let pane, let worktree = agentWorktrees[pane],
+              let text = try? String(contentsOfFile: absolutePath, encoding: .utf8) else { return }
+        for (symbol, origin) in surfaceChanges.sorted(by: { $0.key < $1.key }) where origin.pane != pane {
+            // Cheap textual prefilter before asking the language server.
+            let name = symbol.split(separator: "#").last?.split(separator: ".").last.map(String.init) ?? ""
+            guard !name.isEmpty, text.contains(name) else { continue }
+            guard let sites = try? references.references(to: symbol, in: worktree), !sites.isEmpty else { continue }
+            let event = GaterEvent(kind: "references", extra: [
+                "symbol": .string(symbol),
+                "change": .string(origin.change),
+                "from_pane": origin.pane.map { .string($0) } ?? .null,
+                "in_pane": .string(pane),
+                "in_worktree": .string(worktree),
+                "sites": .array(sites.map { .string($0.description) }),
+                "trigger": .string("new_use"),
+            ])
+            DispatchQueue.main.async { [weak self] in self?.record(event) }
+        }
+    }
+
     /// For each public-surface change, asks every *other* agent worktree's
     /// server who uses the symbol there. Runs on symbolQueue.
     private func findReferences(for update: SymbolUpdate, from pane: String?) {
         let surface = update.changes.filter(\.isPublicSurface)
         guard !surface.isEmpty else { return }
+        for change in surface where change.change != .added {
+            surfaceChanges[change.id] = (pane, change.change.rawValue)
+        }
         let editor = SymbolEngine.canonical(update.worktree)
         for change in surface where change.change != .added { // nobody uses a brand-new symbol yet
             for (otherPane, worktree) in agentWorktrees.sorted(by: { $0.key < $1.key })
