@@ -93,6 +93,8 @@ public enum SymbolExtractor {
                 kind: kind,
                 startLine: Int(node.pointRange.lowerBound.row) + 1,
                 endLine: Int(node.pointRange.upperBound.row) + 1,
+                nameLine: Int(nameNode.pointRange.lowerBound.row) + 1,
+                nameColumn: nameNode.range.location - text.lineRange(for: NSRange(location: nameNode.range.location, length: 0)).location,
                 isExported: exported,
                 signatureHash: hash(normalize(parts.signature) + (exported ? "|export" : "")),
                 bodyHash: hash(normalize(parts.body))

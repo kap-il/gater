@@ -19,6 +19,10 @@ public struct CodeSymbol: Codable, Equatable {
     /// 1-based, inclusive.
     public var startLine: Int
     public var endLine: Int
+    /// Where the symbol's name is: 1-based line, 0-based UTF-16 column —
+    /// the position LSP queries (references, rename) need.
+    public var nameLine: Int
+    public var nameColumn: Int
     public var isExported: Bool
     /// Hash of the declaration minus its body: parameters, return type,
     /// type annotation, heritage, modifiers, and export status.

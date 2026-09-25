@@ -64,6 +64,9 @@ public final class SymbolEngine {
         return canonicalPath.hasPrefix(prefix) ? String(canonicalPath.dropFirst(prefix.count)) : path
     }
 
+    /// Symlink-resolved path, for comparing worktrees.
+    public static func canonical(_ path: String) -> String { realpathOrSelf(path) }
+
     private static func realpathOrSelf(_ path: String) -> String {
         guard let resolved = realpath(path, nil) else { return path }
         defer { free(resolved) }
