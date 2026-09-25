@@ -24,12 +24,17 @@ public enum HookProcessor {
         /// orchestrator | delegate (GATER_ROLE).
         public var role: String?
         public var delegationTool: String
+        /// Current plan.json, when the pane knows its repo. Enables id
+        /// consistency checks; nil skips them.
+        public var plan: Plan?
         public var now: Date
 
-        public init(paneId: String, role: String?, delegationTool: String = "SendMessage", now: Date = Date()) {
+        public init(paneId: String, role: String?, delegationTool: String = "SendMessage",
+                    plan: Plan? = nil, now: Date = Date()) {
             self.paneId = paneId
             self.role = role
             self.delegationTool = delegationTool
+            self.plan = plan
             self.now = now
         }
     }
@@ -37,8 +42,12 @@ public enum HookProcessor {
     /// Reads the transcript file a Stop payload points at; injectable for tests.
     public typealias TranscriptReader = (String) -> String?
 
+    /// Maps a SendMessage address (e.g. a peer's `uds:` socket) to a pane id.
+    public typealias PaneResolver = (String) -> String?
+
     public static func process(payload: [String: JSONValue], env: Environment,
-                               readTranscript: TranscriptReader = { try? String(contentsOfFile: $0, encoding: .utf8) }) -> HookOutcome {
+                               readTranscript: TranscriptReader = { try? String(contentsOfFile: $0, encoding: .utf8) },
+                               resolvePane: PaneResolver = { _ in nil }) -> HookOutcome {
         let hookEvent = payload["hook_event_name"]?.stringValue
         let toolName = payload["tool_name"]?.stringValue
         let toolInput = payload["tool_input"]
@@ -59,7 +68,8 @@ public enum HookProcessor {
         case ("PreToolUse", env.delegationTool?):
             guard env.role == "orchestrator" else { return HookOutcome(events: [], exitCode: 0, stderr: nil) }
             let text = toolInput?.value(atPath: "message")?.stringValue ?? ""
-            if case let .failure(error) = GaterProtocol.parseDelegationMessage(text) {
+            switch GaterProtocol.parseDelegationMessage(text) {
+            case let .failure(error):
                 let message = """
                 Gater: blocked this message — \(error)
                 Messages from the orchestrator must start with a GATER/1 block. Fix the block and resend; nothing else about the message is being judged.
@@ -68,15 +78,29 @@ public enum HookProcessor {
                 \(GaterProtocol.expectedFormatHelp)
                 """
                 return HookOutcome(events: [], exitCode: 2, stderr: message)
+            case let .success(message):
+                if let plan = env.plan, let problem = idProblem(message, plan: plan) {
+                    return HookOutcome(events: [], exitCode: 2, stderr: """
+                    Gater: blocked this message — \(problem)
+                    Only the GATER/1 block needs fixing; resend with the corrected id or type.
+                    """)
+                }
+                return HookOutcome(events: [], exitCode: 0, stderr: nil)
             }
-            return HookOutcome(events: [], exitCode: 0, stderr: nil)
 
         // The send went through: log it. Orchestrator sends that parse as
         // GATER/1 are delegations; anything else is a plain message.
         case ("PostToolUse", env.delegationTool?):
             let text = toolInput?.value(atPath: "message")?.stringValue ?? ""
             var extra: [String: JSONValue] = ["raw": .string(text)]
-            if let to = toolInput?.value(atPath: "to") { extra["to"] = to }
+            if let to = toolInput?.value(atPath: "to") {
+                extra["to"] = to
+                // Replies address the sender's socket (uds:/…/<pid>.sock);
+                // name the pane so the log reads orch → delegate → orch.
+                if let address = to.stringValue {
+                    extra["to_pane"] = .string(resolvePane(address) ?? address)
+                }
+            }
             if let summary = toolInput?.value(atPath: "summary") { extra["summary"] = summary }
             if env.role == "orchestrator", case let .success(message) = GaterProtocol.parseDelegationMessage(text) {
                 extra["gater"] = gaterObject(message)
@@ -115,6 +139,30 @@ public enum HookProcessor {
             extra["hook"] = payload["hook_event_name"]
             return HookOutcome(events: [event("raw", extra)], exitCode: 0, stderr: nil)
         }
+    }
+
+    /// Id/type consistency against the plan: `delegate` must mint a new id;
+    /// every other type must reference an existing dish. This is still
+    /// format checking (is the block well-formed for the plan it's about),
+    /// never a judgment about the delegation itself.
+    static func idProblem(_ message: GaterMessage, plan: Plan) -> String? {
+        let existing = plan.dish(message.id)
+        switch message.type {
+        case .delegate:
+            if let existing {
+                return "dish \(message.id) already exists (\(existing.feature): \"\(existing.directive)\", \(existing.state.rawValue)). New work needs a new id — next free is \(plan.nextDishId). To change \(message.id), use type: instruct or rescope."
+            }
+        default:
+            if existing == nil {
+                let known = plan.dishes.filter { $0.state.isActive }.map(\.id)
+                let list = known.isEmpty ? "there are no dishes yet" : "existing dishes: \(known.joined(separator: ", "))"
+                return "type: \(message.type.rawValue) needs an existing dish, but \(message.id) doesn't exist (\(list)). For new work use type: delegate with id: \(plan.nextDishId), plus feature and directive."
+            }
+            if message.type == .merge, let target = message.mergeInto, plan.dish(target) == nil {
+                return "merge_into: \(target) doesn't exist."
+            }
+        }
+        return nil
     }
 
     static func gaterObject(_ message: GaterMessage) -> JSONValue {

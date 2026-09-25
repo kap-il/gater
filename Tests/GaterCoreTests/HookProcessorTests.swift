@@ -66,6 +66,54 @@ final class HookProcessorTests: XCTestCase {
         XCTAssertNil(event.fields["gater"])
     }
 
+    func testReplyAddressIsResolvedToPane() throws {
+        let payload = send("PostToolUse", message: "sunny", to: "uds:/tmp/cc-socks/76756.sock")
+        let outcome = HookProcessor.process(payload: payload, env: delegate,
+                                            resolvePane: { $0.hasSuffix("76756.sock") ? "orch" : nil })
+        XCTAssertEqual(outcome.events.first?["to_pane"]?.stringValue, "orch")
+        XCTAssertEqual(outcome.events.first?["to"]?.stringValue, "uds:/tmp/cc-socks/76756.sock")
+    }
+
+    // MARK: - Plan-aware id checks
+
+    private func orch(with events: [GaterEvent]) -> HookProcessor.Environment {
+        HookProcessor.Environment(paneId: "orch", role: "orchestrator", plan: PlanReducer.replay(events))
+    }
+
+    private func block(_ type: String, id: String, extra: String = "") -> String {
+        "GATER/1\ntype: \(type)\nid: \(id)\nfeature: Auth\ndirective: do it\n\(extra)---\nbody"
+    }
+
+    func testInstructForUnknownDishIsBlockedWithNextId() {
+        // Exactly the live-test slip: new work sent as `instruct d-001`.
+        let outcome = HookProcessor.process(payload: send("PreToolUse", message: block("instruct", id: "d-001")),
+                                            env: orch(with: []))
+        XCTAssertEqual(outcome.exitCode, 2)
+        XCTAssertTrue(outcome.stderr?.contains("type: delegate with id: d-001") ?? false, outcome.stderr ?? "")
+    }
+
+    func testDelegateReusingIdIsBlocked() {
+        let existing = HookProcessor.process(payload: send("PostToolUse", message: validDelegation), env: self.orch)
+        let outcome = HookProcessor.process(payload: send("PreToolUse", message: validDelegation),
+                                            env: orch(with: existing.events))
+        XCTAssertEqual(outcome.exitCode, 2)
+        XCTAssertTrue(outcome.stderr?.contains("next free is d-008") ?? false, outcome.stderr ?? "")
+    }
+
+    func testValidFollowUpPasses() {
+        let existing = HookProcessor.process(payload: send("PostToolUse", message: validDelegation), env: self.orch)
+        let outcome = HookProcessor.process(payload: send("PreToolUse", message: block("instruct", id: "d-007")),
+                                            env: orch(with: existing.events))
+        XCTAssertEqual(outcome.exitCode, 0, outcome.stderr ?? "")
+    }
+
+    func testMergeIntoMissingDishIsBlocked() {
+        let existing = HookProcessor.process(payload: send("PostToolUse", message: validDelegation), env: self.orch)
+        let merge = "GATER/1\ntype: merge\nid: d-007\nmerge_into: d-099\n---\nfold"
+        let outcome = HookProcessor.process(payload: send("PreToolUse", message: merge), env: orch(with: existing.events))
+        XCTAssertEqual(outcome.exitCode, 2)
+    }
+
     // MARK: - Edits and commands
 
     func testEditLogsPathAndTool() throws {
@@ -124,4 +172,45 @@ final class HookProcessorTests: XCTestCase {
         let payload: [String: JSONValue] = ["hook_event_name": .string("Stop"), "last_assistant_message": .string("hi")]
         XCTAssertEqual(HookProcessor.process(payload: payload, env: delegate).events.map(\.kind), ["stop"])
     }
+}
+
+final class PaneAddressResolverTests: XCTestCase {
+    func testPidParsing() {
+        XCTAssertEqual(PaneAddressResolver.pid(fromAddress: "uds:/tmp/cc-socks/76756.sock"), 76756)
+        XCTAssertNil(PaneAddressResolver.pid(fromAddress: "delegate-auth"))
+        XCTAssertNil(PaneAddressResolver.pid(fromAddress: "uds:/tmp/x.txt"))
+    }
+
+    #if os(macOS)
+    func testReadsGaterPaneIdFromAnotherProcess() throws {
+        // macOS withholds the environment of Apple platform binaries like
+        // /bin/sleep, so use an ad-hoc-signed copy — an ordinary binary,
+        // like claude.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("gater-resolver-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let sleeper = dir.appendingPathComponent("sleeper")
+        try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: sleeper.path)
+        let sign = Process()
+        sign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        sign.arguments = ["--force", "--sign", "-", sleeper.path]
+        try sign.run()
+        sign.waitUntilExit()
+
+        let child = Process()
+        child.executableURL = sleeper
+        child.arguments = ["5"]
+        child.environment = ["GATER_PANE_ID": "delegate-auth", "OTHER": "1"]
+        try child.run()
+        defer { child.terminate() }
+        // Right after run() the child may not have exec'd yet; wait for it.
+        let deadline = Date().addingTimeInterval(2)
+        while PaneAddressResolver.environmentVariable("OTHER", ofProcess: child.processIdentifier) == nil,
+              Date() < deadline { usleep(10_000) }
+        let address = "uds:/tmp/cc-socks/\(child.processIdentifier).sock"
+        XCTAssertEqual(PaneAddressResolver.pane(forAddress: address), "delegate-auth")
+        XCTAssertEqual(PaneAddressResolver.environmentVariable("OTHER", ofProcess: child.processIdentifier), "1")
+        XCTAssertNil(PaneAddressResolver.environmentVariable("MISSING", ofProcess: child.processIdentifier))
+    }
+    #endif
 }

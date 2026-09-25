@@ -22,11 +22,16 @@ guard let payload = (try? JSONDecoder().decode(JSONValue.self, from: stdinData))
     exit(0)
 }
 
+// The plan lets the orchestrator's sends be checked for id mistakes.
+let plan = environment["GATER_REPO"].flatMap { PlanStore.load(from: PlanStore.defaultPath(repoRoot: $0)) }
+
 let outcome = HookProcessor.process(
     payload: payload,
     env: .init(paneId: paneId,
                role: environment["GATER_ROLE"],
-               delegationTool: environment["GATER_DELEGATION_TOOL_NAME"] ?? "SendMessage")
+               delegationTool: environment["GATER_DELEGATION_TOOL_NAME"] ?? "SendMessage",
+               plan: plan),
+    resolvePane: PaneAddressResolver.pane(forAddress:)
 )
 
 let collector = environment["GATER_COLLECTOR"] ?? EventBus.defaultSocketPath()
