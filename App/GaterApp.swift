@@ -247,6 +247,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                let before = SymbolExtractor.describe(symbolId: symbol, source: source, path: path) {
                 input.oldSignature = before.signature
             }
+            // Parser facts: does each use still fit the new arity?
+            let name = String(symbol[symbol.index(after: hash)...]).split(separator: ".").last.map(String.init) ?? ""
+            let newArity = read(overlap.fromPane, path)
+                .flatMap { CallCompatibility.arity(symbolId: symbol, source: $0, path: path) }
+            if let newArity {
+                for site in overlap.sites {
+                    let parts = site.split(separator: ":")
+                    guard parts.count >= 2, let line = Int(parts.last!) else { continue }
+                    let file = parts.dropLast().joined(separator: ":")
+                    guard let source = read(overlap.inPane, file) else { continue }
+                    for count in CallCompatibility.argumentCounts(calling: name, source: source, path: file, line: line) {
+                        let plural = count == 1 ? "argument" : "arguments"
+                        let fits = newArity.accepts(count)
+                        input.callChecks.append("\(site): passes \(count) \(plural); the new signature \(newArity.description)\(fits ? " — OK" : "")")
+                        if !fits { input.breaksCalls = true }
+                    }
+                }
+            }
             input.siteLines = overlap.sites.map { site in
                 let parts = site.split(separator: ":")
                 guard parts.count >= 2, let line = Int(parts.last!),

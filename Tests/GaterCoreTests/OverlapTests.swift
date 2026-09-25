@@ -161,4 +161,14 @@ final class ReviewAndWakeTests: XCTestCase {
         XCTAssertEqual(sent?.value(atPath: "state.agents.delegate-auth.directive")?.stringValue, "add session expiry")
         XCTAssertEqual(verdict.event(overlap: surfaceInput().overlap)["verdict"]?.stringValue, "conflict")
     }
+
+    func testParserFactsReachStateAndMessage() {
+        var input = surfaceInput()
+        input.callChecks = ["src/dashboard/UserCard.tsx:4: passes 1 argument; the new signature requires 2"]
+        input.breaksCalls = true
+        let state = ConflictReviewer.state(for: input, maxCode: 1000)
+        XCTAssertEqual(state.value(atPath: "call_checks.some_call_breaks"), .bool(true))
+        let text = WakeMessage.render(input, verdict: ReviewVerdict(probability: 0.97, model: "m"))
+        XCTAssertTrue(text.contains("(old signature, now breaks: passes 1 argument; the new signature requires 2)"), text)
+    }
 }

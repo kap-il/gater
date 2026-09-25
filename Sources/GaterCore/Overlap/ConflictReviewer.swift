@@ -32,9 +32,15 @@ public struct ReviewInput: Equatable {
     public var siteLines: [String]
     /// sharedFeature: code each pane changed in the shared feature.
     public var changesByPane: [String: [String]]
+    /// Parser-computed arity facts per using site, e.g.
+    /// `src/a.tsx:4: passes 1 argument; the new signature requires 2`.
+    public var callChecks: [String]
+    /// True when a parser check proved at least one use now breaks.
+    public var breaksCalls: Bool
 
     public init(overlap: Overlap, parties: [OverlapParty], oldSignature: String? = nil, newSignature: String? = nil,
-                newCode: String? = nil, siteLines: [String] = [], changesByPane: [String: [String]] = [:]) {
+                newCode: String? = nil, siteLines: [String] = [], changesByPane: [String: [String]] = [:],
+                callChecks: [String] = [], breaksCalls: Bool = false) {
         self.overlap = overlap
         self.parties = parties
         self.oldSignature = oldSignature
@@ -42,6 +48,8 @@ public struct ReviewInput: Equatable {
         self.newCode = newCode
         self.siteLines = siteLines
         self.changesByPane = changesByPane
+        self.callChecks = callChecks
+        self.breaksCalls = breaksCalls
     }
 
     func party(_ pane: String?) -> OverlapParty? {
@@ -114,6 +122,14 @@ public struct ConflictReviewer {
             state["signature_after"] = input.newSignature.map { .string($0) } ?? .null
             state["changed_code"] = input.newCode.map { .string(String($0.prefix(maxCode))) } ?? .null
             state["uses"] = .array(input.siteLines.map { .string($0) })
+            if !input.callChecks.isEmpty {
+                // Deterministic facts: spare Jev from inferring types.
+                state["call_checks"] = .object([
+                    "source": .string("computed by a parser from both agents' code; reliable"),
+                    "results": .array(input.callChecks.map { .string($0) }),
+                    "some_call_breaks": .bool(input.breaksCalls),
+                ])
+            }
         } else {
             state["changes"] = .object(input.changesByPane.mapValues { snippets in
                 .array(snippets.map { .string(String($0.prefix(maxCode / max(snippets.count, 1)))) })
@@ -166,7 +182,8 @@ public enum WakeMessage {
                 changed += " \(clip(before)) -> \(clip(after))"
             }
             lines.append(changed)
-            lines.append("\(user) calls \(symbol) at \(overlap.sites.joined(separator: ", ")) (old signature)")
+            let note = input.breaksCalls ? "old signature, now breaks: \(input.callChecks.first.map(breakSummary) ?? "arity")" : "old signature"
+            lines.append("\(user) calls \(symbol) at \(overlap.sites.joined(separator: ", ")) (\(note))")
         case .sharedFeature:
             let labels = overlap.panes.map { input.party($0)?.label ?? $0 }
             lines.append("\(labels.joined(separator: " and ")) are both changing \(overlap.feature) code")
@@ -183,6 +200,12 @@ public enum WakeMessage {
             lines.append("Uncertain ownership involved: \(list.joined(separator: ", "))")
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// `src/a.tsx:4: passes 1 argument; the new signature requires 2` →
+    /// `passes 1 argument; the new signature requires 2`
+    static func breakSummary(_ check: String) -> String {
+        check.components(separatedBy: ": ").dropFirst().joined(separator: ": ")
     }
 
     /// `src/users.ts#getUser` → `getUser()`
