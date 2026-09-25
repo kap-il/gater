@@ -30,6 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Latest decision per symbol id, rebuilt from the log's ownership
     /// events at launch. Only touched on symbolQueue.
     private var ownership: [String: (feature: String, status: String)] = [:]
+    /// One TypeScript 7 server per agent worktree (spec §4.8). symbolQueue only.
+    private let references = ReferenceEngine()
+    /// Agent pane id → worktree, mirrored from PaneManager. symbolQueue only.
+    private var agentWorktrees: [String: String] = [:]
     private var paneManager: PaneManager!
     private var windowController: MainWindowController!
 
@@ -71,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         paneManager = PaneManager(repoRoot: repoRoot) { [weak self] event in self?.record(event) }
         windowController = MainWindowController(paneManager: paneManager)
+        trackAgentWorktrees()
         windowController.showWindow(nil)
 
         startEventBus()
@@ -120,6 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) {
+        symbolQueue.sync { references.stopAll() }
         paneManager?.closeAll()
         eventBus?.stop()
         eventLog?.close()
@@ -134,15 +140,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController?.eventFeed.append(stored)
     }
 
-    /// Edit → re-parse the file → `symbols_changed` (spec §4.6).
+    /// Mirrors agent panes into symbolQueue state, wrapping the window
+    /// controller's pane callbacks, and stops a pane's language server when
+    /// the pane closes.
+    private func trackAgentWorktrees() {
+        let added = paneManager.onPaneAdded
+        let removed = paneManager.onPaneRemoved
+        paneManager.onPaneAdded = { [weak self] pane in
+            added?(pane)
+            guard pane.role != .shell else { return }
+            self?.symbolQueue.async { self?.agentWorktrees[pane.id] = pane.worktree }
+        }
+        paneManager.onPaneRemoved = { [weak self] pane in
+            removed?(pane)
+            self?.symbolQueue.async {
+                guard let self, let worktree = self.agentWorktrees.removeValue(forKey: pane.id) else { return }
+                if !self.agentWorktrees.values.contains(worktree) { self.references.stop(worktree: worktree) }
+            }
+        }
+    }
+
+    /// Edit → re-parse the file → `symbols_changed` (spec §4.6) → ownership
+    /// (§4.7) → for public-surface changes, references in every other
+    /// agent's worktree (§4.8).
     private func analyzeSymbols(for event: GaterEvent) {
+        if event.kind == "delegation" { warmLanguageServer(for: event) }
         guard event.kind == "edit", let path = event["path"]?.stringValue, path.hasPrefix("/") else { return }
         symbolQueue.async { [weak self] in
             guard let self, let update = self.symbolEngine?.fileEdited(absolutePath: path) else { return }
+            self.references.filesChanged(in: update.worktree, relativePaths: [update.path])
             if let changed = update.event(pane: event.pane) {
                 DispatchQueue.main.async { self.record(changed) }
             }
             self.classifyOwnership(update, absolutePath: path)
+            self.findReferences(for: update, from: event.pane)
+        }
+    }
+
+    /// Spec §4.8: a worktree's server starts when a delegation begins there,
+    /// so the first overlap query doesn't pay the startup cost.
+    private func warmLanguageServer(for event: GaterEvent) {
+        guard event.fields["gater"]?.value(atPath: "type")?.stringValue == "delegate",
+              let pane = event["to_pane"]?.stringValue ?? event["to"]?.stringValue else { return }
+        symbolQueue.async { [weak self] in
+            guard let self, let worktree = self.agentWorktrees[pane] else { return }
+            _ = try? self.references.server(for: worktree)
+        }
+    }
+
+    /// For each public-surface change, asks every *other* agent worktree's
+    /// server who uses the symbol there. Runs on symbolQueue.
+    private func findReferences(for update: SymbolUpdate, from pane: String?) {
+        let surface = update.changes.filter(\.isPublicSurface)
+        guard !surface.isEmpty else { return }
+        let editor = SymbolEngine.canonical(update.worktree)
+        for change in surface where change.change != .added { // nobody uses a brand-new symbol yet
+            for (otherPane, worktree) in agentWorktrees.sorted(by: { $0.key < $1.key })
+            where SymbolEngine.canonical(worktree) != editor {
+                do {
+                    guard let sites = try references.references(to: change.id, in: worktree), !sites.isEmpty else { continue }
+                    let event = GaterEvent(kind: "references", extra: [
+                        "symbol": .string(change.id),
+                        "change": .string(change.change.rawValue),
+                        "from_pane": pane.map { .string($0) } ?? .null,
+                        "in_pane": .string(otherPane),
+                        "in_worktree": .string(worktree),
+                        "sites": .array(sites.map { .string($0.description) }),
+                    ])
+                    DispatchQueue.main.async { [weak self] in self?.record(event) }
+                } catch {
+                    let event = GaterEvent(kind: "references_error", extra: ["text": .string("\(otherPane): \(error)")])
+                    DispatchQueue.main.async { [weak self] in self?.record(event) }
+                }
+            }
         }
     }
 

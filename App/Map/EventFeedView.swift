@@ -93,6 +93,10 @@ final class EventFeedView: NSView {
             if case let .number(c)? = event["confidence"] { confidence = String(format: " %.2f", c) }
             let uncertain = event["status"]?.stringValue == "uncertain" ? " (uncertain)" : ""
             detail = "\(symbol) → \(event["feature"]?.stringValue ?? "?")\(confidence)\(uncertain)"
+        case "references":
+            let symbol = (event["symbol"]?.stringValue ?? "").split(separator: "#").last.map(String.init) ?? ""
+            let sites = (event.fields["sites"]?.arrayValue ?? []).compactMap(\.stringValue)
+            detail = "\(symbol) (\(event["change"]?.stringValue ?? "")) used in \(event["in_pane"]?.stringValue ?? "?"): \(sites.joined(separator: ", "))"
         case "done_note":
             detail = "\(event["dish"]?.stringValue ?? "?"): \(event["did"]?.stringValue ?? "")"
         default:
