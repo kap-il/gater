@@ -21,6 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventLog: EventLog?
     private var eventBus: EventBus?
     private var planStore: PlanStore?
+    /// The map's data model (spec §4.11). Main thread only.
+    private var mapModel = MapModel()
+    private var mapRefreshScheduled = false
     private var symbolEngine: SymbolEngine?
     /// Parsing is off the main thread and serialized (the engine keeps
     /// snapshot state).
@@ -81,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Rebuild occupancy and remember what was already reported.
         let history = (try? EventLog.replay(path: logPath)) ?? []
         overlaps.replay(history, plan: store.current)
+        mapModel.replay(history)
         for event in history where event.kind == "symbols_changed" {
             for change in event.fields["changes"]?.arrayValue ?? [] {
                 guard let id = change.value(atPath: "id")?.stringValue,
@@ -100,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController = MainWindowController(paneManager: paneManager)
         trackAgentWorktrees()
         windowController.showWindow(nil)
+        scheduleMapRefresh()
 
         startEventBus()
         paneManager.installRepoIntegrations()
@@ -137,6 +142,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// permission needed, unlike screencapture).
     private func scheduleDebugSnapshot() {
         guard let path = ProcessInfo.processInfo.environment["GATER_SNAPSHOT"] else { return }
+        // A fixed size, so snapshots don't depend on the saved window frame.
+        windowController.window?.setContentSize(NSSize(width: 1500, height: 950))
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             guard let view = self?.windowController.window?.contentView,
                   let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
@@ -161,6 +168,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let stored = (try? eventLog?.append(event)) ?? event
         planStore?.apply(stored)
         windowController?.eventFeed.append(stored)
+        mapModel.apply(stored)
+        scheduleMapRefresh()
         symbolQueue.async { [weak self] in self?.detectOverlaps(stored) }
     }
 
@@ -236,6 +245,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         classifyOwnership(update, absolutePath: path)
         findReferences(for: update, from: pane)
         checkNewUses(in: update, absolutePath: path, by: pane)
+    }
+
+    // MARK: - Map
+
+    /// Coalesces bursts of events into one redraw. The plan store applies
+    /// events on its own queue, so the refresh runs a beat later to see them.
+    private func scheduleMapRefresh() {
+        guard !mapRefreshScheduled else { return }
+        mapRefreshScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, let plan = self.planStore?.current else { return }
+            self.mapRefreshScheduled = false
+            self.windowController?.map.update(features: self.mapModel.features(plan: plan), activity: self.mapModel.activity)
+        }
     }
 
     // MARK: - Overlaps (spec §4.9)
@@ -448,7 +471,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.planStore?.apply(event)
             self?.analyzeSymbols(for: event)
             self?.symbolQueue.async { self?.detectOverlaps(event) }
-            DispatchQueue.main.async { self?.windowController?.eventFeed.append(event) }
+            DispatchQueue.main.async {
+                self?.windowController?.eventFeed.append(event)
+                self?.mapModel.apply(event)
+                self?.scheduleMapRefresh()
+            }
         }, onRequest: { [weak self] request in
             self?.handle(request: request) ?? .object(["ok": .bool(false), "reason": .string("Gater is shutting down")])
         })

@@ -3,29 +3,31 @@ import GaterCore
 
 /// The one Gater window (spec §4.1 item 6):
 ///
-///     ┌──────────────────────────┬─────────────────┐
-///     │ [orchestrator][shell 1]  │ delegate: auth  │
-///     │                          │  (terminal)     │
-///     │  orchestrator terminal   ├─────────────────┤
-///     │                          │ delegate: dash  │
-///     │                          ├─────────────────┤
-///     │                          │ events          │
-///     └──────────────────────────┴─────────────────┘
+///     ┌─────────────────────┬────────────────┬──────────────┐
+///     │ [orchestrator][sh1] │ delegate: auth │ Tree|Web|Ev  │
+///     │                     │  (terminal)    │ ┌ Auth ────┐ │
+///     │  orchestrator       ├────────────────┤ │ d-001 …  │ │
+///     │  terminal           │ delegate: dash │ └──────────┘ │
+///     └─────────────────────┴────────────────┴──────────────┘
 ///
-/// Orchestrator and shells are tabs; each delegate is a tile stacked in
-/// the side column above the event feed (the map's future home).
+/// Orchestrator and shells are tabs; each delegate is a tile in the middle
+/// column (hidden until the first delegate opens); the map has its own
+/// column on the right.
 final class MainWindowController: NSWindowController, NSTabViewDelegate {
     let paneManager: PaneManager
     let eventFeed = EventFeedView(frame: NSRect(x: 0, y: 0, width: 360, height: 700))
+    lazy var map = MapView(eventFeed: eventFeed)
     private let tabView = NSTabView()
     private let rootSplit = NSSplitView()
     private let sideSplit = NSSplitView()
+    /// Bottom of the delegate column: takes whatever height collapsed
+    /// tiles leave (none while any tile is expanded).
+    private let columnFiller = NSView()
     private var tiles: [String: PaneTileView] = [:]
     /// The pane whose terminal last had keyboard focus.
     private(set) var focusedPaneId: String?
 
-    private static let sideWidth: CGFloat = 360
-    private static let feedHeightWithTiles: CGFloat = 160
+    private static let mapWidth: CGFloat = 360
 
     init(paneManager: PaneManager) {
         self.paneManager = paneManager
@@ -45,26 +47,29 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         // size on first layout, so seed real frames before adding them —
         // a zero-width pane otherwise loses the whole window to its sibling.
         let content = window.contentRect(forFrameRect: window.frame).size
-        let sideWidth = min(Self.sideWidth, content.width / 2)
+        let mapWidth = min(Self.mapWidth, content.width / 3)
         rootSplit.frame = NSRect(origin: .zero, size: content)
         rootSplit.isVertical = true
         rootSplit.dividerStyle = .thin
-        tabView.frame = NSRect(x: 0, y: 0, width: content.width - sideWidth - 1, height: content.height)
-        sideSplit.frame = NSRect(x: content.width - sideWidth, y: 0, width: sideWidth, height: content.height)
+        tabView.frame = NSRect(x: 0, y: 0, width: content.width - mapWidth - 1, height: content.height)
+        sideSplit.frame = NSRect(x: 0, y: 0, width: 0, height: content.height)
         sideSplit.isVertical = false
         sideSplit.dividerStyle = .thin
-        eventFeed.frame = sideSplit.bounds
-        sideSplit.addArrangedSubview(eventFeed)
+        sideSplit.isHidden = true // until the first delegate opens
+        columnFiller.frame = NSRect(x: 0, y: 0, width: 0, height: 0)
+        sideSplit.addArrangedSubview(columnFiller)
+        map.frame = NSRect(x: content.width - mapWidth, y: 0, width: mapWidth, height: content.height)
 
         rootSplit.addArrangedSubview(tabView)
         rootSplit.addArrangedSubview(sideSplit)
-        // Window resizes go to the main area; the side column keeps its width.
-        rootSplit.setHoldingPriority(.defaultLow, forSubviewAt: 0)
-        rootSplit.setHoldingPriority(.defaultHigh, forSubviewAt: 1)
+        rootSplit.addArrangedSubview(map)
+        // Window resizes go to the terminals; the map keeps its width.
+        rootSplit.setHoldingPriority(NSLayoutConstraint.Priority(250), forSubviewAt: 0)
+        rootSplit.setHoldingPriority(NSLayoutConstraint.Priority(260), forSubviewAt: 1)
+        rootSplit.setHoldingPriority(NSLayoutConstraint.Priority(270), forSubviewAt: 2)
         NSLayoutConstraint.activate([
-            tabView.widthAnchor.constraint(greaterThanOrEqualToConstant: 400),
-            sideSplit.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
-            eventFeed.heightAnchor.constraint(greaterThanOrEqualToConstant: 60),
+            tabView.widthAnchor.constraint(greaterThanOrEqualToConstant: 360),
+            map.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
         ])
         window.contentView = rootSplit
         window.center()
@@ -103,6 +108,7 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         if let tile = tiles.removeValue(forKey: pane.id) {
             sideSplit.removeArrangedSubview(tile)
             tile.removeFromSuperview()
+            if tiles.isEmpty { sideSplit.isHidden = true }
             layoutSideColumn()
         } else {
             let index = tabView.indexOfTabViewItem(withIdentifier: pane.id)
@@ -130,13 +136,18 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         // Seed a sensible frame (see the NSSplitView note in init), then
         // insert above the event feed.
         tile.frame = NSRect(x: 0, y: 0, width: sideSplit.bounds.width, height: sideSplit.bounds.height / 2)
-        sideSplit.insertArrangedSubview(tile, at: tiles.count - 1)
-        sideSplit.setHoldingPriority(NSLayoutConstraint.Priority(250), forSubviewAt: tiles.count - 1)
+        sideSplit.insertArrangedSubview(tile, at: tiles.count - 1) // above the filler
 
         if widenColumn {
-            // A delegate runs a full claude session; give the column room.
-            let target = max(rootSplit.bounds.width * 0.45, Self.sideWidth)
-            rootSplit.setPosition(rootSplit.bounds.width - target, ofDividerAt: 0)
+            // A delegate runs a full claude session; give its column room
+            // between the orchestrator and the map.
+            sideSplit.isHidden = false
+            rootSplit.layoutSubtreeIfNeeded()
+            let total = rootSplit.bounds.width
+            let mapWidth = min(max(map.frame.width, 240), total / 3)
+            let tilesWidth = max((total - mapWidth) * 0.45, 360)
+            rootSplit.setPosition(total - mapWidth - tilesWidth, ofDividerAt: 0)
+            rootSplit.setPosition(total - mapWidth, ofDividerAt: 1)
         }
         layoutSideColumn()
         window?.makeFirstResponder(pane.view)
@@ -157,9 +168,9 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         layoutSideColumn()
     }
 
-    /// Collapsed tiles take just their header; expanded tiles share what's
-    /// left equally above a fixed-height event feed. With every tile
-    /// collapsed (or none open), the feed takes the rest of the column.
+    /// Collapsed tiles take just their header; expanded tiles share the
+    /// rest of the column equally. With every tile collapsed, the filler
+    /// below them takes the leftover space.
     private func layoutSideColumn() {
         sideSplit.layoutSubtreeIfNeeded()
         let ordered = sideSplit.arrangedSubviews.compactMap { $0 as? PaneTileView }
@@ -170,16 +181,15 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         let collapsedHeight = PaneTileView.headerHeight
         let expandedCount = ordered.filter { !$0.isCollapsed }.count
         let collapsedTotal = CGFloat(ordered.count - expandedCount) * collapsedHeight
-        let feed = expandedCount > 0 ? min(Self.feedHeightWithTiles, total / 3) : 0
         let expandedHeight = expandedCount > 0
-            ? (total - feed - collapsedTotal - CGFloat(ordered.count) * divider) / CGFloat(expandedCount)
+            ? (total - collapsedTotal - CGFloat(ordered.count) * divider) / CGFloat(expandedCount)
             : 0
-
-        // The feed holds its height; space freed by a collapse goes to the
-        // expanded tiles.
-        sideSplit.setHoldingPriority(NSLayoutConstraint.Priority(260), forSubviewAt: ordered.count)
+        // Window height changes go to expanded tiles (250) first; the filler
+        // (740) only grows when every tile is collapsed (750).
+        sideSplit.setHoldingPriority(NSLayoutConstraint.Priority(740), forSubviewAt: ordered.count)
         var y: CGFloat = 0
         for (index, tile) in ordered.enumerated() {
+            sideSplit.setHoldingPriority(NSLayoutConstraint.Priority(tile.isCollapsed ? 750 : 250), forSubviewAt: index)
             y += tile.isCollapsed ? collapsedHeight : expandedHeight
             sideSplit.setPosition(y, ofDividerAt: index)
             sideSplit.layoutSubtreeIfNeeded()
