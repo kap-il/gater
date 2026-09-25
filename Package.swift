@@ -28,10 +28,13 @@ let package = Package(
     ]
 )
 
-// The terminal is macOS-only: it needs libghostty-vt (built by
-// scripts/build-ghostty.sh). Keeping them out of the Linux graph
+// The terminal and app are macOS-only: they need libghostty-vt (built by
+// scripts/build-ghostty.sh) and AppKit. Keeping them out of the Linux graph
 // preserves the spec's "GaterCore builds and tests on Linux" split.
 #if os(macOS)
+package.products += [
+    .executable(name: "Gater", targets: ["Gater"])
+]
 package.targets += [
     .binaryTarget(
         name: "GhosttyVT",
@@ -45,6 +48,11 @@ package.targets += [
         name: "GaterTerminal",
         dependencies: ["GhosttyVT", "GaterPTY"],
         path: "Sources/GaterTerminal"
+    ),
+    .executableTarget(
+        name: "Gater",
+        dependencies: ["GaterCore", "GaterTerminal"],
+        path: "App"
     ),
     .testTarget(
         name: "GaterTerminalTests",
