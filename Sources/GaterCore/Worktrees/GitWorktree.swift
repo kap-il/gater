@@ -126,12 +126,12 @@ public enum GitWorktree {
         return String(cString: resolved)
     }
 
-    struct GitResult {
-        var status: Int32
-        var output: String
+    public struct GitResult {
+        public var status: Int32
+        public var output: String
     }
 
-    static func git(_ arguments: [String], in directory: String) throws -> GitResult {
+    public static func git(_ arguments: [String], in directory: String) throws -> GitResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["git", "-C", directory] + arguments

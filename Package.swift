@@ -8,7 +8,12 @@ let package = Package(
     ],
     products: [
         .library(name: "GaterCore", targets: ["GaterCore"]),
+        .library(name: "GaterSymbols", targets: ["GaterSymbols"]),
         .executable(name: "gater-hook", targets: ["gater-hook"])
+    ],
+    dependencies: [
+        .package(url: "https://github.com/ChimeHQ/SwiftTreeSitter", exact: "0.9.0"),
+        .package(url: "https://github.com/tree-sitter/tree-sitter-typescript", exact: "0.23.2"),
     ],
     targets: [
         .target(
@@ -24,6 +29,22 @@ let package = Package(
             name: "GaterCoreTests",
             dependencies: ["GaterCore"],
             path: "Tests/GaterCoreTests"
+        ),
+        // tree-sitter symbol engine (spec §4.6). Separate from GaterCore so
+        // the core stays dependency-free.
+        .target(
+            name: "GaterSymbols",
+            dependencies: [
+                "GaterCore",
+                .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
+                .product(name: "TreeSitterTypeScript", package: "tree-sitter-typescript"),
+            ],
+            path: "Sources/GaterSymbols"
+        ),
+        .testTarget(
+            name: "GaterSymbolsTests",
+            dependencies: ["GaterSymbols"],
+            path: "Tests/GaterSymbolsTests"
         )
     ]
 )
@@ -51,7 +72,7 @@ package.targets += [
     ),
     .executableTarget(
         name: "Gater",
-        dependencies: ["GaterCore", "GaterTerminal"],
+        dependencies: ["GaterCore", "GaterTerminal", "GaterSymbols"],
         path: "App"
     ),
     .testTarget(
