@@ -178,4 +178,62 @@ final class TerminalCoreTests: XCTestCase {
         XCTAssertEqual(core.encode(mouse: .press, button: .left, at: .zero, mods: [],
                                    anyButtonPressed: true, geometry: geometry), [])
     }
+
+    // MARK: - Selection
+
+    private let selGeometry = SelectionGeometry(cellWidth: 10, cellHeight: 20, padding: 0, screenHeight: 80)
+
+    /// Center of viewport cell (col, row) in points.
+    private func pt(_ col: Int, _ row: Int) -> CGPoint {
+        CGPoint(x: col * 10 + 5, y: row * 20 + 10)
+    }
+
+    /// Right part of a cell: a drag includes the cell under the pointer only
+    /// once it's past the cell's midpoint, like macOS text selection.
+    private func past(_ col: Int, _ row: Int) -> CGPoint {
+        CGPoint(x: col * 10 + 8, y: row * 20 + 10)
+    }
+
+    func testDragSelectsAndCopiesText() throws {
+        let core = try TerminalCore(cols: 20, rows: 4)
+        core.feed("hello world\r\nsecond line")
+        core.selectionPress(at: pt(0, 0), geometry: selGeometry)
+        XCTAssertFalse(core.hasSelection, "a press alone selects nothing")
+        core.selectionDrag(to: past(4, 0), geometry: selGeometry)
+        core.selectionRelease(at: past(4, 0), geometry: selGeometry)
+        XCTAssertTrue(core.hasSelection)
+        XCTAssertEqual(core.selectedText(), "hello")
+
+        let row = core.snapshot().cells[0]
+        XCTAssertTrue(row[0].selected && row[4].selected)
+        XCTAssertFalse(row[5].selected)
+    }
+
+    func testDragAcrossLines() throws {
+        let core = try TerminalCore(cols: 20, rows: 4)
+        core.feed("hello world\r\nsecond line")
+        core.selectionPress(at: pt(6, 0), geometry: selGeometry)
+        core.selectionDrag(to: past(5, 1), geometry: selGeometry)
+        XCTAssertEqual(core.selectedText(), "world\nsecond")
+    }
+
+    func testDoubleClickSelectsWord() throws {
+        let core = try TerminalCore(cols: 20, rows: 4)
+        core.feed("hello world")
+        core.selectionPress(at: pt(7, 0), geometry: selGeometry)
+        core.selectionRelease(at: pt(7, 0), geometry: selGeometry)
+        core.selectionPress(at: pt(7, 0), geometry: selGeometry)
+        XCTAssertEqual(core.selectedText(), "world")
+    }
+
+    func testClickAndClearRemoveSelection() throws {
+        let core = try TerminalCore(cols: 20, rows: 4)
+        core.feed("hello world")
+        core.selectionPress(at: pt(0, 0), geometry: selGeometry)
+        core.selectionDrag(to: pt(4, 0), geometry: selGeometry)
+        core.clearSelection()
+        XCTAssertFalse(core.hasSelection)
+        XCTAssertNil(core.selectedText())
+        XCTAssertFalse(core.snapshot().cells[0][0].selected)
+    }
 }

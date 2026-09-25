@@ -29,6 +29,15 @@ public final class TerminalCore {
     private var keyEvent: GhosttyKeyEvent?
     private var mouseEncoder: GhosttyMouseEncoder?
     private var mouseEvent: GhosttyMouseEvent?
+    private var gesture: GhosttySelectionGesture?
+    private var gesturePress: GhosttySelectionGestureEvent?
+    private var gestureDrag: GhosttySelectionGestureEvent?
+    private var gestureRelease: GhosttySelectionGestureEvent?
+    /// Whether a selection is installed; lets snapshots skip per-cell
+    /// selection queries in the common case.
+    private var selectionActive = false
+    /// Forces a full row rebuild on the next snapshot after selection edits.
+    private var selectionDirty = false
 
     public private(set) var cols: UInt16
     public private(set) var rows: UInt16
@@ -59,6 +68,10 @@ public final class TerminalCore {
         try check("ghostty_key_event_new", ghostty_key_event_new(nil, &keyEvent))
         try check("ghostty_mouse_encoder_new", ghostty_mouse_encoder_new(nil, &mouseEncoder))
         try check("ghostty_mouse_event_new", ghostty_mouse_event_new(nil, &mouseEvent))
+        try check("ghostty_selection_gesture_new", ghostty_selection_gesture_new(nil, &gesture))
+        try check("gesture press", ghostty_selection_gesture_event_new(nil, &gesturePress, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_PRESS))
+        try check("gesture drag", ghostty_selection_gesture_event_new(nil, &gestureDrag, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_DRAG))
+        try check("gesture release", ghostty_selection_gesture_event_new(nil, &gestureRelease, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_RELEASE))
         var trackLastCell = true // suppress repeat motion reports within one cell
         ghostty_mouse_encoder_setopt(mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL, &trackLastCell)
 
@@ -68,6 +81,10 @@ public final class TerminalCore {
     }
 
     deinit {
+        for event in [gesturePress, gestureDrag, gestureRelease] {
+            if let event { ghostty_selection_gesture_event_free(event) }
+        }
+        if let gesture { ghostty_selection_gesture_free(gesture, terminal) }
         if let mouseEvent { ghostty_mouse_event_free(mouseEvent) }
         if let mouseEncoder { ghostty_mouse_encoder_free(mouseEncoder) }
         if let keyEvent { ghostty_key_event_free(keyEvent) }
@@ -317,6 +334,122 @@ public final class TerminalCore {
         return out.prefix(written).map { UInt8(bitPattern: $0) }
     }
 
+    // MARK: - Selection
+    //
+    // Driven by libghostty's selection gesture state machine: single click
+    // + drag selects cells, double-click words, triple-click lines. The
+    // resulting selection is installed on the terminal, which tracks it as
+    // output scrolls.
+
+    public func selectionPress(at point: CGPoint, geometry: SelectionGeometry) {
+        lock.lock(); defer { lock.unlock() }
+        guard let gesture, let gesturePress, var ref = gridRef(at: point, geometry: geometry) else { return }
+        var position = GhosttySurfacePosition(x: Double(point.x), y: Double(point.y))
+        var time = DispatchTime.now().uptimeNanoseconds
+        var interval = UInt64(geometry.doubleClickInterval * 1_000_000_000)
+        var distance = Double(geometry.cellWidth) * 2
+        ghostty_selection_gesture_event_set(gesturePress, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF, &ref)
+        ghostty_selection_gesture_event_set(gesturePress, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_POSITION, &position)
+        ghostty_selection_gesture_event_set(gesturePress, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_TIME_NS, &time)
+        ghostty_selection_gesture_event_set(gesturePress, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REPEAT_INTERVAL_NS, &interval)
+        ghostty_selection_gesture_event_set(gesturePress, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REPEAT_DISTANCE, &distance)
+
+        var selection = GhosttySelection()
+        selection.size = MemoryLayout<GhosttySelection>.size
+        if ghostty_selection_gesture_event(gesture, terminal, gesturePress, &selection) == GHOSTTY_SUCCESS {
+            installSelection(&selection) // double/triple click
+        } else {
+            installSelection(nil)        // a plain click clears
+        }
+    }
+
+    public func selectionDrag(to point: CGPoint, geometry: SelectionGeometry) {
+        lock.lock(); defer { lock.unlock() }
+        guard let gesture, let gestureDrag, var ref = gridRef(at: point, geometry: geometry) else { return }
+        var position = GhosttySurfacePosition(x: Double(point.x), y: Double(point.y))
+        var dragGeometry = GhosttySelectionGestureGeometry()
+        dragGeometry.columns = UInt32(cols)
+        dragGeometry.cell_width = geometry.cellWidth
+        dragGeometry.padding_left = geometry.padding
+        dragGeometry.screen_height = geometry.screenHeight
+        ghostty_selection_gesture_event_set(gestureDrag, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF, &ref)
+        ghostty_selection_gesture_event_set(gestureDrag, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_POSITION, &position)
+        ghostty_selection_gesture_event_set(gestureDrag, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_GEOMETRY, &dragGeometry)
+
+        var selection = GhosttySelection()
+        selection.size = MemoryLayout<GhosttySelection>.size
+        if ghostty_selection_gesture_event(gesture, terminal, gestureDrag, &selection) == GHOSTTY_SUCCESS {
+            installSelection(&selection)
+        }
+    }
+
+    public func selectionRelease(at point: CGPoint, geometry: SelectionGeometry) {
+        lock.lock(); defer { lock.unlock() }
+        guard let gesture, let gestureRelease else { return }
+        if var ref = gridRef(at: point, geometry: geometry) {
+            ghostty_selection_gesture_event_set(gestureRelease, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF, &ref)
+        } else {
+            ghostty_selection_gesture_event_set(gestureRelease, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF, nil)
+        }
+        _ = ghostty_selection_gesture_event(gesture, terminal, gestureRelease, nil)
+    }
+
+    public func clearSelection() {
+        lock.lock(); defer { lock.unlock() }
+        guard selectionActive else { return }
+        installSelection(nil)
+    }
+
+    public var hasSelection: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return selectionActive
+    }
+
+    /// The selected text as plain text (soft-wrapped lines rejoined,
+    /// trailing blanks trimmed), or nil when nothing is selected.
+    public func selectedText() -> String? {
+        lock.lock(); defer { lock.unlock() }
+        var selection = GhosttySelection()
+        selection.size = MemoryLayout<GhosttySelection>.size
+        guard ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_SELECTION, &selection) == GHOSTTY_SUCCESS else {
+            return nil
+        }
+        return withUnsafePointer(to: &selection) { selPtr -> String? in
+            var options = GhosttyTerminalSelectionFormatOptions()
+            options.size = MemoryLayout<GhosttyTerminalSelectionFormatOptions>.size
+            options.emit = GHOSTTY_FORMATTER_FORMAT_PLAIN
+            options.unwrap = true
+            options.trim = true
+            options.selection = selPtr
+            var buffer: UnsafeMutablePointer<UInt8>?
+            var length = 0
+            guard ghostty_terminal_selection_format_alloc(terminal, nil, options, &buffer, &length) == GHOSTTY_SUCCESS,
+                  let buffer else { return nil }
+            defer { ghostty_free(nil, buffer, length) }
+            return String(decoding: UnsafeBufferPointer(start: buffer, count: length), as: UTF8.self)
+        }
+    }
+
+    private func installSelection(_ selection: UnsafeMutablePointer<GhosttySelection>?) {
+        ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_SELECTION, selection)
+        selectionActive = selection != nil
+        selectionDirty = true
+    }
+
+    /// Viewport cell under `point` (clamped to the grid), as a grid ref.
+    private func gridRef(at point: CGPoint, geometry: SelectionGeometry) -> GhosttyGridRef? {
+        let col = Int((point.x - CGFloat(geometry.padding)) / CGFloat(max(geometry.cellWidth, 1)))
+        let row = Int((point.y - CGFloat(geometry.padding)) / CGFloat(max(geometry.cellHeight, 1)))
+        var gridPoint = GhosttyPoint()
+        gridPoint.tag = GHOSTTY_POINT_TAG_VIEWPORT
+        gridPoint.value.coordinate.x = UInt16(min(max(col, 0), Int(cols) - 1))
+        gridPoint.value.coordinate.y = UInt32(min(max(row, 0), Int(rows) - 1))
+        var ref = GhosttyGridRef()
+        ref.size = MemoryLayout<GhosttyGridRef>.size
+        guard ghostty_terminal_grid_ref(terminal, gridPoint, &ref) == GHOSTTY_SUCCESS else { return nil }
+        return ref
+    }
+
     // MARK: - Rendering snapshot
 
     /// Copies what's needed to draw one frame out of libghostty. Only rows
@@ -339,6 +472,8 @@ public final class TerminalCore {
         ghostty_render_state_get(renderState, GHOSTTY_RENDER_STATE_DATA_ROWS, &stateRows)
 
         let rebuildAll = dirty == GHOSTTY_RENDER_STATE_DIRTY_FULL || cachedRows.count != Int(stateRows)
+            || selectionDirty || selectionActive
+        selectionDirty = false
         if cachedRows.count != Int(stateRows) {
             cachedRows = Array(repeating: [], count: Int(stateRows))
         }
@@ -402,6 +537,12 @@ public final class TerminalCore {
                     scalars.append(Unicode.Scalar(cp) ?? "\u{FFFD}")
                 }
                 cell.text = String(scalars)
+            }
+
+            if selectionActive {
+                var selected = false
+                ghostty_render_state_row_cells_get(rowCells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_SELECTED, &selected)
+                cell.selected = selected
             }
 
             var hasStyling = false
@@ -586,5 +727,24 @@ public struct MouseGeometry: Sendable {
         self.cellWidth = cellWidth
         self.cellHeight = cellHeight
         self.padding = padding
+    }
+}
+
+/// What selection gestures need to map points to cells.
+public struct SelectionGeometry: Sendable {
+    public var cellWidth: UInt32
+    public var cellHeight: UInt32
+    public var padding: UInt32
+    public var screenHeight: UInt32
+    /// Max seconds between clicks for double/triple click (NSEvent.doubleClickInterval).
+    public var doubleClickInterval: Double
+
+    public init(cellWidth: UInt32, cellHeight: UInt32, padding: UInt32, screenHeight: UInt32,
+                doubleClickInterval: Double = 0.5) {
+        self.cellWidth = cellWidth
+        self.cellHeight = cellHeight
+        self.padding = padding
+        self.screenHeight = screenHeight
+        self.doubleClickInterval = doubleClickInterval
     }
 }

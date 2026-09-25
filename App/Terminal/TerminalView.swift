@@ -10,12 +10,18 @@ final class TerminalView: NSView {
     let session: TerminalSession
     private let font = TerminalFont()
     private let padding: CGFloat = 4
+    private static let selectionColor = RGB(r: 0x3A, g: 0x5F, b: 0x9E)
+    /// True while a mouse drag is making a selection (vs. being reported
+    /// to a mouse-tracking program).
+    private var selecting = false
     private var scrollAccumulator: CGFloat = 0
     private var lastGrid: (cols: UInt16, rows: UInt16)?
 
     /// Called for every keystroke or paste the human sends to this pane;
     /// the pane manager uses it to log human_intervention on delegates.
     var onHumanInput: ((HumanInput) -> Void)?
+    /// Keyboard focus gained/lost; the window uses it to track the active pane.
+    var onFocusChange: ((Bool) -> Void)?
 
     enum HumanInput {
         case typed(String)
@@ -98,6 +104,7 @@ final class TerminalView: NSView {
             bg = fg
             fg = newFg
         }
+        if cell.selected { bg = Self.selectionColor }
         return (fg, bg)
     }
 
@@ -219,12 +226,14 @@ final class TerminalView: NSView {
 
     override func becomeFirstResponder() -> Bool {
         session.focusChanged(true)
+        onFocusChange?(true)
         needsDisplay = true
         return true
     }
 
     override func resignFirstResponder() -> Bool {
         session.focusChanged(false)
+        onFocusChange?(false)
         needsDisplay = true
         return true
     }
@@ -261,12 +270,47 @@ final class TerminalView: NSView {
         session.send(bytes)
     }
 
+    private var selectionGeometry: SelectionGeometry {
+        SelectionGeometry(cellWidth: UInt32(font.cellSize.width), cellHeight: UInt32(font.cellSize.height),
+                          padding: UInt32(padding), screenHeight: UInt32(max(bounds.height, 0)),
+                          doubleClickInterval: NSEvent.doubleClickInterval)
+    }
+
+    /// Left-button gestures select text, unless the program asked for the
+    /// mouse — then they're reported to it, and Shift forces selection
+    /// (the usual terminal convention).
+    private func leftButtonSelects(_ event: NSEvent) -> Bool {
+        !session.core.isMouseTracking || event.modifierFlags.contains(.shift)
+    }
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
-        report(.press, .left, event)
+        if leftButtonSelects(event) {
+            selecting = true
+            session.core.selectionPress(at: convert(event.locationInWindow, from: nil), geometry: selectionGeometry)
+            needsDisplay = true
+        } else {
+            report(.press, .left, event)
+        }
     }
-    override func mouseUp(with event: NSEvent) { report(.release, .left, event) }
-    override func mouseDragged(with event: NSEvent) { report(.motion, .left, event) }
+
+    override func mouseDragged(with event: NSEvent) {
+        if selecting {
+            session.core.selectionDrag(to: convert(event.locationInWindow, from: nil), geometry: selectionGeometry)
+            needsDisplay = true
+        } else {
+            report(.motion, .left, event)
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if selecting {
+            selecting = false
+            session.core.selectionRelease(at: convert(event.locationInWindow, from: nil), geometry: selectionGeometry)
+        } else {
+            report(.release, .left, event)
+        }
+    }
     override func rightMouseDown(with event: NSEvent) { report(.press, .right, event) }
     override func rightMouseUp(with event: NSEvent) { report(.release, .right, event) }
     override func rightMouseDragged(with event: NSEvent) { report(.motion, .right, event) }
@@ -291,6 +335,10 @@ final class TerminalView: NSView {
     override func keyDown(with event: NSEvent) {
         guard session.isRunning else { return }
         let key = keyEvent(from: event, action: event.isARepeat ? .repeat : .press)
+        if session.core.hasSelection {
+            session.core.clearSelection()
+            needsDisplay = true
+        }
         session.send(key: key)
 
         switch event.keyCode {
@@ -357,6 +405,12 @@ final class TerminalView: NSView {
     }
 
     // MARK: - Paste
+
+    @objc func copy(_ sender: Any?) {
+        guard let text = session.core.selectedText(), !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
 
     @objc func paste(_ sender: Any?) {
         guard session.isRunning, let text = NSPasteboard.general.string(forType: .string) else { return }

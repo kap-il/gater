@@ -35,14 +35,16 @@ public struct Cell: Equatable, Sendable {
     public var fg: RGB?
     public var bg: RGB?
     public var style: CellStyle
+    public var selected: Bool
 
     public static let blank = Cell(text: "", fg: nil, bg: nil, style: [])
 
-    public init(text: String, fg: RGB?, bg: RGB?, style: CellStyle) {
+    public init(text: String, fg: RGB?, bg: RGB?, style: CellStyle, selected: Bool = false) {
         self.text = text
         self.fg = fg
         self.bg = bg
         self.style = style
+        self.selected = selected
     }
 }
 
