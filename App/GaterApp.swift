@@ -49,6 +49,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showError("Couldn't start the orchestrator pane", error)
         }
         NSApp.activate(ignoringOtherApps: true)
+        scheduleDebugSnapshot()
+    }
+
+    /// GATER_SNAPSHOT=<file.png>: render the window to a PNG after 2s.
+    /// Lets UI changes be checked headlessly (no screen-recording
+    /// permission needed, unlike screencapture).
+    private func scheduleDebugSnapshot() {
+        guard let path = ProcessInfo.processInfo.environment["GATER_SNAPSHOT"] else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let view = self?.windowController.window?.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

@@ -7,6 +7,7 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
     let paneManager: PaneManager
     let eventFeed = EventFeedView(frame: NSRect(x: 0, y: 0, width: 360, height: 700))
     private let tabView = NSTabView()
+    private static let feedWidth: CGFloat = 360
 
     init(paneManager: PaneManager) {
         self.paneManager = paneManager
@@ -22,15 +23,29 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         tabView.tabViewType = .topTabsBezelBorder
         tabView.delegate = self
 
-        let split = NSSplitView()
+        // NSSplitView records each pane's *current* width as its preferred
+        // size (at its holding priority) on first layout, so both panes
+        // need real frames before they're added — otherwise the zero-width
+        // tab view loses the whole window to the feed.
+        let content = window.contentRect(forFrameRect: window.frame)
+        let split = NSSplitView(frame: NSRect(origin: .zero, size: content.size))
         split.isVertical = true
         split.dividerStyle = .thin
+        let feedWidth = min(Self.feedWidth, content.width / 2)
+        tabView.frame = NSRect(x: 0, y: 0, width: content.width - feedWidth - split.dividerThickness,
+                               height: content.height)
+        eventFeed.frame = NSRect(x: content.width - feedWidth, y: 0, width: feedWidth, height: content.height)
         split.addArrangedSubview(tabView)
         split.addArrangedSubview(eventFeed)
+        // Window resizes grow/shrink the terminals; the feed keeps its width.
         split.setHoldingPriority(.defaultLow, forSubviewAt: 0)
         split.setHoldingPriority(.defaultHigh, forSubviewAt: 1)
+        // Neither side may be dragged shut.
+        NSLayoutConstraint.activate([
+            tabView.widthAnchor.constraint(greaterThanOrEqualToConstant: 400),
+            eventFeed.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
+        ])
         window.contentView = split
-        split.setPosition(1000, ofDividerAt: 0)
         window.center()
 
         paneManager.onPaneAdded = { [weak self] pane in self?.addTab(for: pane) }
