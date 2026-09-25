@@ -29,7 +29,7 @@ let paneId = env("GATER_PANE_ID") ?? "unknown"
 let collectorPath = env("GATER_COLLECTOR") ?? EventBus.defaultSocketPath()
 let delegationToolName = env("GATER_DELEGATION_TOOL_NAME")
 
-fields["pane_id"] = .string(paneId)
+fields["pane"] = .string(paneId)
 if fields["ts"] == nil {
     fields["ts"] = .string(ISO8601DateFormatter().string(from: Date()))
 }
@@ -97,7 +97,7 @@ if hookEventName == "PreToolUse",
         if let note = GaterProtocol.extractDoneNote(from: lastMessage) {
             let doneFields: [String: JSONValue] = [
                 "kind": .string("done_note"),
-                "pane_id": .string(paneId),
+                "pane": .string(paneId),
                 "ts": .string(ISO8601DateFormatter().string(from: Date())),
                 "dish": .string(note.dishId),
                 "did": .string(note.did),
