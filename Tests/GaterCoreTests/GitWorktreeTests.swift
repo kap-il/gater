@@ -83,4 +83,17 @@ final class GitWorktreeTests: XCTestCase {
             XCTAssertEqual($0 as? GitWorktreeError, .notARepository(sandbox.path))
         }
     }
+
+    /// Seen live: the user deleted the worktree folders by hand; git kept
+    /// them registered as "prunable".
+    func testDeletedWorktreeFolderIsRecreatedOnItsBranch() throws {
+        let path = try GitWorktree.ensure(delegate: "auth", repoRoot: repo)
+        try "work".write(toFile: path + "/done.txt", atomically: true, encoding: .utf8)
+        XCTAssertEqual(try GitWorktree.git(["add", "done.txt"], in: path).status, 0)
+        XCTAssertEqual(try GitWorktree.git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "work"], in: path).status, 0)
+        try FileManager.default.removeItem(atPath: path)
+
+        XCTAssertEqual(try GitWorktree.ensure(delegate: "auth", repoRoot: repo), path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path + "/done.txt"), "back on gater/auth with its commits")
+    }
 }

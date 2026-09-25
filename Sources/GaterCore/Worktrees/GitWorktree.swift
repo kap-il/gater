@@ -81,6 +81,10 @@ public enum GitWorktree {
             throw GitWorktreeError.notARepository(repoRoot)
         }
 
+        // Forget worktrees whose folders were deleted by hand ("prunable"),
+        // or a stale record would hand back a directory that isn't there.
+        _ = try? git(["worktree", "prune"], in: root)
+
         let target = path(forDelegate: name, repoRoot: root)
         let canonicalTarget = canonical(target)
         if try list(repoRoot: root).contains(where: { canonical($0) == canonicalTarget }) {
