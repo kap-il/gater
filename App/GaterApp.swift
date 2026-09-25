@@ -48,6 +48,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             showError("Couldn't start the orchestrator pane", error)
         }
+        // GATER_DEBUG_DELEGATES=a,b opens those delegates at launch, for
+        // exercising the tiled layout (with GATER_SNAPSHOT) without clicks.
+        for name in (ProcessInfo.processInfo.environment["GATER_DEBUG_DELEGATES"] ?? "")
+            .split(separator: ",").map(String.init) where !name.isEmpty {
+            _ = try? paneManager.spawnDelegate(name: name)
+        }
         NSApp.activate(ignoringOtherApps: true)
         scheduleDebugSnapshot()
     }
@@ -160,7 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func selectPaneTab(_ sender: NSMenuItem) {
-        windowController.selectTab(at: sender.tag)
+        windowController.selectPane(at: sender.tag)
     }
 
     // MARK: - UI helpers
@@ -218,6 +224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let editItem = NSMenuItem()
         let editMenu = NSMenu(title: "Edit")
         // nil target → first responder, i.e. the focused TerminalView.
+        editMenu.addItem(withTitle: "Copy", action: #selector(TerminalView.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: #selector(TerminalView.paste(_:)), keyEquivalent: "v")
         editItem.submenu = editMenu
         main.addItem(editItem)
