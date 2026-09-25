@@ -172,6 +172,26 @@ final class PaneManager {
         }
     }
 
+    /// Repo-wide installs, once per launch: the orchestrator's delegation
+    /// skill and the commit-trailer git hook (shared by all worktrees).
+    func installRepoIntegrations() {
+        do {
+            try RepoInstaller.installSkill(repoRoot: repoRoot)
+        } catch {
+            log(GaterEvent(kind: "hooks_error", extra: ["text": .string("skill: \(error)")]))
+        }
+        guard let hook = hookBinaryPath() else { return }
+        do {
+            if case let .skippedForeignHook(path) = try RepoInstaller.installCommitHook(repoRoot: repoRoot, hookBinary: hook) {
+                log(GaterEvent(kind: "hooks_error", extra: [
+                    "text": .string("\(path) exists and isn't Gater's; commit trailers disabled"),
+                ]))
+            }
+        } catch {
+            log(GaterEvent(kind: "hooks_error", extra: ["text": .string("commit hook: \(error)")]))
+        }
+    }
+
     private func hookBinaryPath() -> String? {
         guard let exe = Bundle.main.executableURL else { return nil }
         let path = exe.deletingLastPathComponent().appendingPathComponent("gater-hook").path

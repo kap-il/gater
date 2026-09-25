@@ -55,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.showWindow(nil)
 
         startEventBus()
+        paneManager.installRepoIntegrations()
 
         do {
             try paneManager.spawnOrchestrator()

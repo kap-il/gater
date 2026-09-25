@@ -16,6 +16,14 @@ let environment = ProcessInfo.processInfo.environment
 // Gater; only Gater panes set GATER_PANE_ID.
 guard let paneId = environment["GATER_PANE_ID"], !paneId.isEmpty else { exit(0) }
 
+// prepare-commit-msg mode: `gater-hook --commit-trailers <message-file>`.
+let arguments = CommandLine.arguments
+if arguments.count >= 3, arguments[1] == "--commit-trailers" {
+    let plan = environment["GATER_REPO"].flatMap { PlanStore.load(from: PlanStore.defaultPath(repoRoot: $0)) }
+    try? CommitTrailers.append(to: arguments[2], plan: plan, pane: paneId)
+    exit(0) // never block a commit over trailers
+}
+
 let stdinData = FileHandle.standardInput.readDataToEndOfFile()
 guard let payload = (try? JSONDecoder().decode(JSONValue.self, from: stdinData))?.objectValue else {
     FileHandle.standardError.write("gater-hook: could not parse hook JSON from stdin\n".data(using: .utf8)!)

@@ -1,24 +1,16 @@
 #!/bin/sh
-# Appends Gater accountability trailers to every commit made inside a
-# delegate's worktree, so who-did-what-for-which-feature survives outside
-# Gater itself (spec §4.3). Reads the current dish/feature/pane from env
-# vars Gater sets when it spawns the pane.
+# gater-managed: installed by Gater; reinstalled on each launch.
+# Appends Gater-Dish / Gater-Feature / Gater-Agent trailers to commits made
+# inside Gater panes, so who-did-what-for-which-feature survives in git
+# (spec §4.3). The current dish comes from .gater/plan.json, so trailers
+# follow the plan rather than whatever was true when the pane started.
+# Commits made outside Gater (no GATER_PANE_ID) are left untouched.
 
-commit_msg_file="$1"
-commit_source="$2"
+[ -n "$GATER_PANE_ID" ] || exit 0
 
-# Don't touch merge commits, squash messages, or amends — only fresh commits.
-if [ -n "$commit_source" ] && [ "$commit_source" != "message" ] && [ "$commit_source" != "template" ]; then
-  exit 0
-fi
+# Only fresh commits: leave merges, squashes and amends alone.
+case "$2" in
+  merge|squash|commit) exit 0 ;;
+esac
 
-if [ -z "$GATER_DISH_ID" ]; then
-  exit 0
-fi
-
-{
-  echo ""
-  echo "Gater-Dish: $GATER_DISH_ID"
-  [ -n "$GATER_FEATURE" ] && echo "Gater-Feature: $GATER_FEATURE"
-  [ -n "$GATER_PANE_ID" ] && echo "Gater-Agent: $GATER_PANE_ID"
-} >> "$commit_msg_file"
+exec '@GATER_HOOK@' --commit-trailers "$1"
