@@ -104,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController = MainWindowController(paneManager: paneManager)
         trackAgentWorktrees()
         windowController.showWindow(nil)
+        windowController.map.onOpenFile = { [weak self] feature, path in self?.openFile(feature: feature, path: path) }
         scheduleMapRefresh()
 
         startEventBus()
@@ -142,10 +143,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// permission needed, unlike screencapture).
     private func scheduleDebugSnapshot() {
         guard let path = ProcessInfo.processInfo.environment["GATER_SNAPSHOT"] else { return }
+        let env = ProcessInfo.processInfo.environment
+        if let tab = env["GATER_DEBUG_MAP_TAB"].flatMap(Int.init) { windowController.map.selectTab(tab) }
+        if let open = env["GATER_DEBUG_OPEN_FILE"], let bar = open.firstIndex(of: "|") {
+            // "Feature|path": render the file view instead of the main window.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                self?.openFile(feature: String(open[..<bar]), path: String(open[open.index(after: bar)...]))
+            }
+        }
         // A fixed size, so snapshots don't depend on the saved window frame.
         windowController.window?.setContentSize(NSSize(width: 1500, height: 950))
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let view = self?.windowController.window?.contentView,
+            let fileWindow = FileHighlightWindow.open.last?.window
+            guard let view = (fileWindow ?? self?.windowController.window)?.contentView,
                   let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
             view.cacheDisplay(in: view.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
@@ -249,6 +259,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Map
 
+    /// File highlight view: the file as it is in the worktree building this
+    /// feature (the first dish with an open pane).
+    private func openFile(feature: String, path: String) {
+        guard let plan = planStore?.current else { return }
+        let panes = plan.dishes.filter { $0.feature == feature && $0.state.isActive }.compactMap(\.pane)
+        let pane = panes.first { paneManager.pane(id: $0) != nil } ?? panes.first
+        let worktree = pane.flatMap { paneManager.pane(id: $0)?.worktree }
+            ?? pane.map { GitWorktree.path(forDelegate: String($0.dropFirst("delegate-".count)), repoRoot: paneManager.repoRoot) }
+            ?? paneManager.repoRoot
+        FileHighlightWindow.show(feature: feature, path: path, worktree: worktree, model: mapModel, pane: pane)
+    }
+
     /// Coalesces bursts of events into one redraw. The plan store applies
     /// events on its own queue, so the refresh runs a beat later to see them.
     private func scheduleMapRefresh() {
@@ -257,7 +279,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self, let plan = self.planStore?.current else { return }
             self.mapRefreshScheduled = false
-            self.windowController?.map.update(features: self.mapModel.features(plan: plan), activity: self.mapModel.activity)
+            self.windowController?.map.update(features: self.mapModel.features(plan: plan), activity: self.mapModel.activity,
+                                              edges: self.mapModel.usageEdges(plan: plan))
         }
     }
 

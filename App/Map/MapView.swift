@@ -7,9 +7,15 @@ final class MapView: NSView {
     private let tabs = NSSegmentedControl(labels: ["Tree", "Web", "Events"], trackingMode: .selectOne,
                                           target: nil, action: nil)
     private let tree = FeatureTreeView()
-    private let webPlaceholder = NSTextField(labelWithString: "Web view (feature \"uses\" edges): coming next.")
+    private let web = FeatureWebView()
     private let eventFeed: EventFeedView
-    private var pages: [NSView] { [tree, webPlaceholder, eventFeed] }
+    private var pages: [NSView] { [tree, web, eventFeed] }
+
+    /// Clicked a file under a feature: open the file highlight view.
+    var onOpenFile: ((_ feature: String, _ path: String) -> Void)? {
+        get { tree.onOpenFile }
+        set { tree.onOpenFile = newValue }
+    }
 
     init(eventFeed: EventFeedView) {
         self.eventFeed = eventFeed
@@ -18,11 +24,6 @@ final class MapView: NSView {
         tabs.action = #selector(tabChanged)
         tabs.selectedSegment = 0
         tabs.translatesAutoresizingMaskIntoConstraints = false
-        webPlaceholder.textColor = .secondaryLabelColor
-        webPlaceholder.alignment = .center
-        // Pinned top-to-bottom, a label's default hugging (750) would pull
-        // the whole window down to its text height.
-        webPlaceholder.setContentHuggingPriority(.defaultLow, for: .vertical)
         addSubview(tabs)
         for page in pages {
             page.translatesAutoresizingMaskIntoConstraints = false
@@ -53,8 +54,9 @@ final class MapView: NSView {
         tabChanged()
     }
 
-    func update(features: [MapModel.FeatureNode], activity: [String: MapModel.Activity]) {
-        tree.update(features: features, activity: activity)
+    func update(features: [MapModel.FeatureNode], activity: [String: MapModel.Activity], edges: [MapModel.UsageEdge]) {
+        tree.update(features: features, activity: activity, edges: edges)
+        web.update(features: features, edges: edges)
     }
 }
 
@@ -67,7 +69,8 @@ final class FeatureTreeView: NSView {
     private var expanded: Set<String> = []
     /// GATER_DEBUG_MAP_EXPAND=1: every file list open (for snapshots).
     private let expandAll = ProcessInfo.processInfo.environment["GATER_DEBUG_MAP_EXPAND"] != nil
-    private var last: ([MapModel.FeatureNode], [String: MapModel.Activity]) = ([], [:])
+    private var last: ([MapModel.FeatureNode], [String: MapModel.Activity], [MapModel.UsageEdge]) = ([], [:], [])
+    var onOpenFile: ((String, String) -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -101,8 +104,8 @@ final class FeatureTreeView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func update(features: [MapModel.FeatureNode], activity: [String: MapModel.Activity]) {
-        last = (features, activity)
+    func update(features: [MapModel.FeatureNode], activity: [String: MapModel.Activity], edges: [MapModel.UsageEdge]) {
+        last = (features, activity, edges)
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         stack.addArrangedSubview(orchestratorStrip(activity["orch"]))
@@ -112,13 +115,14 @@ final class FeatureTreeView: NSView {
             stack.addArrangedSubview(empty)
         }
         for feature in features {
-            let card = FeatureCardView(feature: feature, activity: activity,
+            let card = FeatureCardView(feature: feature, activity: activity, edges: edges,
                                        expanded: expandAll || expanded.contains(feature.name))
             card.onToggleFiles = { [weak self] in
                 guard let self else { return }
                 if !self.expanded.insert(feature.name).inserted { self.expanded.remove(feature.name) }
-                self.update(features: self.last.0, activity: self.last.1)
+                self.update(features: self.last.0, activity: self.last.1, edges: self.last.2)
             }
+            card.onOpenFile = { [weak self] path in self?.onOpenFile?(feature.name, path) }
             stack.addArrangedSubview(card)
             card.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -20).isActive = true
         }
@@ -134,8 +138,9 @@ final class FeatureTreeView: NSView {
 /// (directive, agent, what it's doing now), and owned files → symbols.
 final class FeatureCardView: NSView {
     var onToggleFiles: (() -> Void)?
+    var onOpenFile: ((String) -> Void)?
 
-    init(feature: MapModel.FeatureNode, activity: [String: MapModel.Activity], expanded: Bool) {
+    init(feature: MapModel.FeatureNode, activity: [String: MapModel.Activity], edges: [MapModel.UsageEdge], expanded: Bool) {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 8
@@ -173,6 +178,19 @@ final class FeatureCardView: NSView {
             content.addArrangedSubview(Label.make("   " + verdict, size: 10, color: .secondaryLabelColor))
         }
 
+        // Dependency edges (spec: a flagged node shows them overlaid).
+        func names(_ symbols: [String]) -> String {
+            symbols.map { $0.split(separator: "#").last.map(String.init) ?? $0 }.joined(separator: ", ")
+        }
+        for edge in edges where edge.user == feature.name {
+            content.addArrangedSubview(Label.make("→ uses \(edge.owner) (\(names(edge.symbols)))", size: 10,
+                                                  color: edge.overlapping ? .systemRed : .secondaryLabelColor, wraps: true))
+        }
+        for edge in edges where edge.owner == feature.name {
+            content.addArrangedSubview(Label.make("← used by \(edge.user) (\(names(edge.symbols)))", size: 10,
+                                                  color: edge.overlapping ? .systemRed : .secondaryLabelColor, wraps: true))
+        }
+
         for dish in feature.dishes {
             let who = dish.pane ?? "unassigned"
             content.addArrangedSubview(Label.make("\(dish.id) · \(who) · \(dish.state.rawValue)",
@@ -203,7 +221,13 @@ final class FeatureCardView: NSView {
             content.addArrangedSubview(toggle)
             if expanded {
                 for file in feature.files.keys.sorted() {
-                    content.addArrangedSubview(Label.make("  " + file, size: 11, weight: .medium, color: .labelColor))
+                    let link = NSButton(title: "  " + file, target: self, action: #selector(openFile(_:)))
+                    link.isBordered = false
+                    link.font = NSFont.systemFont(ofSize: 11, weight: .medium)
+                    link.contentTintColor = .linkColor
+                    link.identifier = NSUserInterfaceItemIdentifier(file)
+                    link.toolTip = "Open with ownership highlights"
+                    content.addArrangedSubview(link)
                     let chips = NSStackView(views: feature.files[file]!.map(SymbolChip.init))
                     chips.spacing = 4
                     let row = NSStackView(views: [NSView.spacer(width: 12), chips])
@@ -217,6 +241,10 @@ final class FeatureCardView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     @objc private func toggleFiles() { onToggleFiles?() }
+
+    @objc private func openFile(_ sender: NSButton) {
+        if let path = sender.identifier?.rawValue { onOpenFile?(path) }
+    }
 
     static func color(_ state: DishState) -> NSColor {
         switch state {

@@ -210,6 +210,26 @@ public struct MapModel {
         return edges.values.sorted { ($0.user, $0.owner) < ($1.user, $1.owner) }
     }
 
+    /// A use of another feature's changed symbol inside `pane`'s worktree.
+    public struct UseSite: Equatable {
+        /// `path:line`
+        public var site: String
+        public var symbol: String
+        public var overlapping: Bool
+
+        public var path: String { site.split(separator: ":").dropLast().joined(separator: ":") }
+        public var line: Int? { site.split(separator: ":").last.flatMap { Int($0) } }
+    }
+
+    /// Where `pane`'s code uses symbols other agents changed (file view:
+    /// faint underline, red when part of an overlap).
+    public func useSites(inPane pane: String) -> [UseSite] {
+        let overlapSites = Set(overlaps.flatMap(\.sites))
+        return references.values.filter { $0.inPane == pane }.flatMap { ref in
+            ref.sites.map { UseSite(site: $0, symbol: ref.symbol, overlapping: overlapSites.contains($0)) }
+        }.sorted { $0.site < $1.site }
+    }
+
     /// Owner of a symbol, for the file view.
     public func owner(of symbolId: String) -> (feature: String, uncertain: Bool)? {
         owners[symbolId].map { ($0.feature, $0.status != "assigned") }

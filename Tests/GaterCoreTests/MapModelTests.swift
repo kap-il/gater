@@ -99,4 +99,15 @@ final class MapModelTests: XCTestCase {
         map.apply(e("message", ["pane": .string("delegate-dash"), "to": .string("uds:/x.sock"), "to_pane": .string("orch")]))
         XCTAssertEqual(map.activity["delegate-dash"]?.text, "messaged orch")
     }
+
+    func testUseSitesForTheFileView() {
+        var map = MapModel()
+        map.replay(golden)
+        let sites = map.useSites(inPane: "delegate-dash")
+        XCTAssertEqual(sites.map(\.site), ["src/dashboard/UserCard.tsx:4"])
+        XCTAssertEqual(sites.first?.overlapping, true)
+        XCTAssertEqual(sites.first?.path, "src/dashboard/UserCard.tsx")
+        XCTAssertEqual(sites.first?.line, 4)
+        XCTAssertTrue(map.useSites(inPane: "delegate-auth").isEmpty)
+    }
 }
