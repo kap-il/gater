@@ -106,7 +106,14 @@ public enum HookProcessor {
                 extra["gater"] = gaterObject(message)
                 return HookOutcome(events: [event("delegation", extra)], exitCode: 0, stderr: nil)
             }
-            return HookOutcome(events: [event("message", extra)], exitCode: 0, stderr: nil)
+            var events = [event("message", extra)]
+            // Delegates report back by messaging the orchestrator, so the
+            // GATER-DONE note usually rides in the reply (seen live), not in
+            // the final turn text the Stop hook sees.
+            if let note = GaterProtocol.extractDoneNote(from: text) {
+                events.append(doneEvent(note, event))
+            }
+            return HookOutcome(events: events, exitCode: 0, stderr: nil)
 
         case ("PostToolUse", "Edit"?), ("PostToolUse", "Write"?), ("PostToolUse", "MultiEdit"?):
             var extra: [String: JSONValue] = ["tool": .string(toolName ?? "")]
@@ -124,12 +131,7 @@ public enum HookProcessor {
             let last = payload["last_assistant_message"]?.stringValue
                 ?? payload["transcript_path"]?.stringValue.flatMap(readTranscript).flatMap(lastAssistantText)
             if let last, let note = GaterProtocol.extractDoneNote(from: last) {
-                events.append(event("done_note", [
-                    "dish": .string(note.dishId),
-                    "did": .string(note.did),
-                    "assumed": .string(note.assumed),
-                    "touched": .array(note.touched.map { .string($0) }),
-                ]))
+                events.append(doneEvent(note, event))
             }
             return HookOutcome(events: events, exitCode: 0, stderr: nil)
 
@@ -163,6 +165,16 @@ public enum HookProcessor {
             }
         }
         return nil
+    }
+
+    private static func doneEvent(_ note: GaterDoneNote,
+                                  _ make: (String, [String: JSONValue]) -> GaterEvent) -> GaterEvent {
+        make("done_note", [
+            "dish": .string(note.dishId),
+            "did": .string(note.did),
+            "assumed": .string(note.assumed),
+            "touched": .array(note.touched.map { .string($0) }),
+        ])
     }
 
     static func gaterObject(_ message: GaterMessage) -> JSONValue {

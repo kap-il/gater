@@ -71,9 +71,10 @@ final class EventFeedView: NSView {
             let type = gater?.value(atPath: "type")?.stringValue ?? "?"
             let id = gater?.value(atPath: "id")?.stringValue ?? "?"
             let feature = gater?.value(atPath: "feature")?.stringValue.map { " \($0)" } ?? ""
-            detail = "\(type) \(id)\(feature) → \(event["to"]?.stringValue ?? "?")"
+            detail = "\(type) \(id)\(feature) → \(event["to_pane"]?.stringValue ?? event["to"]?.stringValue ?? "?")"
         case "message":
-            detail = "→ \(event["to"]?.stringValue ?? "?"): \(event["summary"]?.stringValue ?? "")"
+            let to = event["to_pane"]?.stringValue ?? event["to"]?.stringValue ?? "?"
+            detail = "→ \(to): \(event["summary"]?.stringValue ?? "")"
         case "edit":
             detail = event["path"]?.stringValue.map { ($0 as NSString).lastPathComponent } ?? ""
         case "command":

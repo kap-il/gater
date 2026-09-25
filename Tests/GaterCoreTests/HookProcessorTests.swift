@@ -66,6 +66,25 @@ final class HookProcessorTests: XCTestCase {
         XCTAssertNil(event.fields["gater"])
     }
 
+    /// Seen live: the delegate put its GATER-DONE note in its SendMessage
+    /// reply to the orchestrator.
+    func testDoneNoteInDelegateReplyIsExtracted() throws {
+        let reply = "GATER-DONE d-001\ndid: Created FRUITS.md\nassumed: repo root means this worktree\ntouched: FRUITS.md"
+        let events = HookProcessor.process(payload: send("PostToolUse", message: reply, to: "uds:/tmp/cc-socks/1.sock"),
+                                           env: delegate).events
+        XCTAssertEqual(events.map(\.kind), ["message", "done_note"])
+        XCTAssertEqual(events[1]["dish"]?.stringValue, "d-001")
+        XCTAssertEqual(events[1].pane, "delegate-auth")
+
+        var plan = PlanReducer.replay([GaterEvent(fields: [
+            "kind": .string("delegation"), "ts": .string("t1"), "to": .string("delegate-auth"),
+            "gater": .object(["type": .string("delegate"), "id": .string("d-001"), "feature": .string("Fruits"),
+                              "directive": .string("doc"), "scope": .array([])]),
+        ])])
+        for e in events { PlanReducer.apply(e, to: &plan) }
+        XCTAssertEqual(plan.dish("d-001")?.state, .pass)
+    }
+
     func testReplyAddressIsResolvedToPane() throws {
         let payload = send("PostToolUse", message: "sunny", to: "uds:/tmp/cc-socks/76756.sock")
         let outcome = HookProcessor.process(payload: payload, env: delegate,
