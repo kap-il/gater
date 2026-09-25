@@ -124,6 +124,7 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         let widenColumn = tiles.isEmpty
         let tile = PaneTileView(pane: pane)
         tile.onClose = { [weak self] pane in self?.paneManager.close(pane) }
+        tile.onToggleCollapse = { [weak self] tile in self?.toggleCollapse(tile) }
         tiles[pane.id] = tile
 
         // Seed a sensible frame (see the NSSplitView note in init), then
@@ -141,18 +142,53 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         window?.makeFirstResponder(pane.view)
     }
 
-    /// Tiles share the column equally above a fixed-height event feed; with
-    /// no tiles, the feed fills the column.
+    func setCollapsed(_ collapsed: Bool, paneId: String) {
+        guard let tile = tiles[paneId], tile.isCollapsed != collapsed else { return }
+        toggleCollapse(tile)
+    }
+
+    private func toggleCollapse(_ tile: PaneTileView) {
+        tile.setCollapsed(!tile.isCollapsed)
+        if tile.isCollapsed, focusedPaneId == tile.pane.id, let orchestrator = paneManager.orchestrator {
+            window?.makeFirstResponder(orchestrator.view) // don't type into a hidden pane
+        } else if !tile.isCollapsed {
+            window?.makeFirstResponder(tile.pane.view)
+        }
+        layoutSideColumn()
+    }
+
+    /// Collapsed tiles take just their header; expanded tiles share what's
+    /// left equally above a fixed-height event feed. With every tile
+    /// collapsed (or none open), the feed takes the rest of the column.
     private func layoutSideColumn() {
         sideSplit.layoutSubtreeIfNeeded()
-        let count = tiles.count
-        guard count > 0 else { return }
+        let ordered = sideSplit.arrangedSubviews.compactMap { $0 as? PaneTileView }
+        guard !ordered.isEmpty else { return }
+
         let total = sideSplit.bounds.height
         let divider = sideSplit.dividerThickness
-        let feed = min(Self.feedHeightWithTiles, total / 3)
-        let tileHeight = (total - feed - CGFloat(count) * divider) / CGFloat(count)
-        for index in 0..<count {
-            sideSplit.setPosition(CGFloat(index + 1) * tileHeight + CGFloat(index) * divider, ofDividerAt: index)
+        let collapsedHeight = PaneTileView.headerHeight
+        let expandedCount = ordered.filter { !$0.isCollapsed }.count
+        let collapsedTotal = CGFloat(ordered.count - expandedCount) * collapsedHeight
+        let feed = expandedCount > 0 ? min(Self.feedHeightWithTiles, total / 3) : 0
+        let expandedHeight = expandedCount > 0
+            ? (total - feed - collapsedTotal - CGFloat(ordered.count) * divider) / CGFloat(expandedCount)
+            : 0
+
+        // The feed holds its height; space freed by a collapse goes to the
+        // expanded tiles.
+        sideSplit.setHoldingPriority(NSLayoutConstraint.Priority(260), forSubviewAt: ordered.count)
+        var y: CGFloat = 0
+        for (index, tile) in ordered.enumerated() {
+            y += tile.isCollapsed ? collapsedHeight : expandedHeight
+            sideSplit.setPosition(y, ofDividerAt: index)
+            sideSplit.layoutSubtreeIfNeeded()
+            y += divider
+        }
+        if ProcessInfo.processInfo.environment["GATER_DEBUG_LAYOUT"] != nil {
+            for view in sideSplit.arrangedSubviews {
+                FileHandle.standardError.write("LAYOUT \(type(of: view)) \(view.frame) min=\(view.fittingSize.height)\n".data(using: .utf8)!)
+            }
         }
     }
 

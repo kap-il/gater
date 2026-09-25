@@ -54,6 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .split(separator: ",").map(String.init) where !name.isEmpty {
             _ = try? paneManager.spawnDelegate(name: name)
         }
+        for name in (ProcessInfo.processInfo.environment["GATER_DEBUG_COLLAPSED"] ?? "")
+            .split(separator: ",").map(String.init) where !name.isEmpty {
+            windowController.setCollapsed(true, paneId: "delegate-\(name)")
+        }
         NSApp.activate(ignoringOtherApps: true)
         scheduleDebugSnapshot()
     }

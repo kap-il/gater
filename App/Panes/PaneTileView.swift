@@ -6,8 +6,23 @@ final class PaneTileView: NSView {
     let pane: Pane
     private let titleLabel = NSTextField(labelWithString: "")
     private let header = NSView()
+    private let chevron = NSButton()
+
+    static let headerHeight: CGFloat = 22
+
+    /// Collapsed tiles show only their header. The terminal is frozen at its
+    /// last size rather than shrunk, so the agent sees no resize and keeps
+    /// running undisturbed.
+    private(set) var isCollapsed = false
+    private var terminalBottom: NSLayoutConstraint!
+    private var frozenTerminalHeight: NSLayoutConstraint!
+    private var minHeight: NSLayoutConstraint!
+    /// Required while collapsed: NSSplitView treats divider positions as
+    /// preferences, so only a hard constraint keeps the tile header-sized.
+    private var collapsedHeight: NSLayoutConstraint!
 
     var onClose: ((Pane) -> Void)?
+    var onToggleCollapse: ((PaneTileView) -> Void)?
 
     init(pane: Pane) {
         self.pane = pane
@@ -25,6 +40,18 @@ final class PaneTileView: NSView {
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        chevron.isBordered = false
+        chevron.title = "▾"
+        chevron.font = NSFont.systemFont(ofSize: 11)
+        chevron.target = self
+        chevron.action = #selector(toggleClicked)
+        chevron.toolTip = "Collapse / expand (or double-click the title bar)"
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+
+        let doubleClick = NSClickGestureRecognizer(target: self, action: #selector(toggleClicked))
+        doubleClick.numberOfClicksRequired = 2
+        header.addGestureRecognizer(doubleClick)
+
         let close = NSButton(title: "✕", target: self, action: #selector(closeClicked))
         close.isBordered = false
         close.font = NSFont.systemFont(ofSize: 10)
@@ -34,6 +61,7 @@ final class PaneTileView: NSView {
         let terminal = pane.view
         terminal.translatesAutoresizingMaskIntoConstraints = false
 
+        header.addSubview(chevron)
         header.addSubview(titleLabel)
         header.addSubview(close)
         addSubview(header)
@@ -42,8 +70,11 @@ final class PaneTileView: NSView {
             header.topAnchor.constraint(equalTo: topAnchor),
             header.leadingAnchor.constraint(equalTo: leadingAnchor),
             header.trailingAnchor.constraint(equalTo: trailingAnchor),
-            header.heightAnchor.constraint(equalToConstant: 22),
-            titleLabel.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 8),
+            header.heightAnchor.constraint(equalToConstant: Self.headerHeight),
+            chevron.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 4),
+            chevron.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            chevron.widthAnchor.constraint(equalToConstant: 16),
+            titleLabel.leadingAnchor.constraint(equalTo: chevron.trailingAnchor, constant: 2),
             titleLabel.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: close.leadingAnchor, constant: -6),
             close.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -6),
@@ -51,9 +82,12 @@ final class PaneTileView: NSView {
             terminal.topAnchor.constraint(equalTo: header.bottomAnchor),
             terminal.leadingAnchor.constraint(equalTo: leadingAnchor),
             terminal.trailingAnchor.constraint(equalTo: trailingAnchor),
-            terminal.bottomAnchor.constraint(equalTo: bottomAnchor),
-            heightAnchor.constraint(greaterThanOrEqualToConstant: 80),
         ])
+        terminalBottom = terminal.bottomAnchor.constraint(equalTo: bottomAnchor)
+        frozenTerminalHeight = terminal.heightAnchor.constraint(equalToConstant: 0)
+        minHeight = heightAnchor.constraint(greaterThanOrEqualToConstant: 80)
+        collapsedHeight = heightAnchor.constraint(equalToConstant: Self.headerHeight)
+        NSLayoutConstraint.activate([terminalBottom, minHeight])
         refreshTitle()
         setFocused(false)
     }
@@ -73,6 +107,30 @@ final class PaneTileView: NSView {
         layer?.borderColor = (focused ? NSColor.controlAccentColor : NSColor.separatorColor).cgColor
         layer?.borderWidth = focused ? 2 : 1
         titleLabel.textColor = focused ? .labelColor : .secondaryLabelColor
+    }
+
+    func setCollapsed(_ collapsed: Bool) {
+        guard collapsed != isCollapsed else { return }
+        isCollapsed = collapsed
+        let terminal = pane.view
+        if collapsed {
+            frozenTerminalHeight.constant = terminal.frame.height
+            terminalBottom.isActive = false
+            frozenTerminalHeight.isActive = true
+            minHeight.isActive = false
+            collapsedHeight.isActive = true
+        } else {
+            collapsedHeight.isActive = false
+            frozenTerminalHeight.isActive = false
+            terminalBottom.isActive = true
+            minHeight.isActive = true
+        }
+        terminal.isHidden = collapsed
+        chevron.title = collapsed ? "▸" : "▾"
+    }
+
+    @objc private func toggleClicked() {
+        onToggleCollapse?(self)
     }
 
     @objc private func closeClicked() {
