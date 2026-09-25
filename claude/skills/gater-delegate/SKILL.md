@@ -13,6 +13,8 @@ Send with the `SendMessage` tool. Gater names each delegate session `delegate-<n
 
 If no session with that name exists yet, sending a `type: delegate` message to it opens one: Gater creates the worktree (branch `gater/<name>`), starts the session, and delivers your message once it's ready. Names use letters, digits, `.`, `_` or `-`.
 
+Unless the user named them, name a new delegate after the work it's doing (`delegate-apples`, `delegate-session-expiry`), not generically (`delegate-a`, `delegate-2`). The name becomes its branch and worktree folder, so it should say what's in them.
+
 ## Message format
 
 Every message you send as the orchestrator must lead with a `GATER/1` block:
