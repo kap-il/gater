@@ -31,6 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let logPath = URL(fileURLWithPath: repoRoot).appendingPathComponent(".gater/events.jsonl")
+        // Runtime state (event log, plan, snapshots) is local, never committed.
+        try? GitWorktree.exclude(pattern: "/.gater/", comment: "Gater runtime state", in: repoRoot)
         do {
             eventLog = try EventLog(path: logPath)
         } catch {

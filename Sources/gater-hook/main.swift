@@ -16,6 +16,10 @@ func env(_ name: String, default def: String? = nil) -> String? {
     ProcessInfo.processInfo.environment[name] ?? def
 }
 
+// Hooks live in the worktree's settings, so they also fire when someone
+// runs `claude` there outside Gater. Only Gater panes set GATER_PANE_ID.
+guard let paneId = env("GATER_PANE_ID"), !paneId.isEmpty else { exit(0) }
+
 let stdinData = FileHandle.standardInput.readDataToEndOfFile()
 let decoder = JSONDecoder()
 
@@ -25,7 +29,6 @@ guard let payload = try? decoder.decode(JSONValue.self, from: stdinData),
     exit(0) // fail open — never break the hook chain over a transport-side problem
 }
 
-let paneId = env("GATER_PANE_ID") ?? "unknown"
 let collectorPath = env("GATER_COLLECTOR") ?? EventBus.defaultSocketPath()
 let delegationToolName = env("GATER_DELEGATION_TOOL_NAME")
 

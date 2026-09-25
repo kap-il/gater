@@ -102,6 +102,24 @@ public enum GitWorktree {
         return target
     }
 
+    /// Adds `pattern` to the repository's `info/exclude` — ignored in every
+    /// worktree, never committed, invisible to the user's .gitignore.
+    public static func exclude(pattern: String, comment: String, in directory: String) throws {
+        let result = try git(["rev-parse", "--git-common-dir"], in: directory)
+        guard result.status == 0 else { return }
+        var commonDir = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !commonDir.hasPrefix("/") {
+            commonDir = (directory as NSString).appendingPathComponent(commonDir)
+        }
+        let exclude = URL(fileURLWithPath: commonDir).appendingPathComponent("info/exclude")
+        let current = (try? String(contentsOf: exclude, encoding: .utf8)) ?? ""
+        guard !current.split(separator: "\n").contains(where: { $0 == pattern }) else { return }
+        try FileManager.default.createDirectory(at: exclude.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let separator = current.isEmpty || current.hasSuffix("\n") ? "" : "\n"
+        try (current + separator + "# \(comment)\n" + pattern + "\n")
+            .write(to: exclude, atomically: true, encoding: .utf8)
+    }
+
     private static func canonical(_ path: String) -> String {
         guard let resolved = realpath(path, nil) else { return path }
         defer { free(resolved) }

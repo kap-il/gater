@@ -17,6 +17,11 @@ final class PaneManager {
     var onPaneRemoved: ((Pane) -> Void)?
     var onPaneTitleChanged: ((Pane) -> Void)?
 
+    /// Claude Code's cross-session send tool, as it appears in hook
+    /// payloads' `tool_name`. Overridable while the name is being verified.
+    var delegationTool = ProcessInfo.processInfo.environment["GATER_DELEGATION_TOOL_NAME"] ?? PaneManager.defaultDelegationTool
+    static let defaultDelegationTool = "SendMessage"
+
     /// The command the orchestrator and delegates run. Overridable so the
     /// terminal can be exercised without claude installed.
     var agentCommand = ProcessInfo.processInfo.environment["GATER_AGENT_COMMAND"] ?? "claude"
@@ -63,6 +68,8 @@ final class PaneManager {
             "GATER_WORKTREE": worktree,
         ]
         if let path = pathWithHookDirectory() { env["PATH"] = path }
+        env["GATER_DELEGATION_TOOL_NAME"] = delegationTool
+        if role != .shell { installHooks(in: worktree) }
         if role == .shell {
             // Shell panes aren't tracked; don't let their hooks claim a pane.
             env["GATER_PANE_ID"] = nil
@@ -135,6 +142,27 @@ final class PaneManager {
 
     private func log(_ event: GaterEvent) {
         record(event)
+    }
+
+    /// Writes Gater's hooks into the pane's worktree so its `claude` reports
+    /// to the event bus. Best-effort: a pane without hooks still works as a
+    /// terminal, so failures are logged rather than blocking the spawn.
+    private func installHooks(in worktree: String) {
+        guard let hook = hookBinaryPath() else {
+            log(GaterEvent(kind: "hooks_error", extra: ["text": .string("gater-hook binary not found next to Gater")]))
+            return
+        }
+        do {
+            try HookInstaller.install(into: worktree, config: .init(hookBinary: hook, delegationTool: delegationTool))
+        } catch {
+            log(GaterEvent(kind: "hooks_error", extra: ["text": .string("\(worktree): \(error)")]))
+        }
+    }
+
+    private func hookBinaryPath() -> String? {
+        guard let exe = Bundle.main.executableURL else { return nil }
+        let path = exe.deletingLastPathComponent().appendingPathComponent("gater-hook").path
+        return FileManager.default.isExecutableFile(atPath: path) ? path : nil
     }
 
     /// Prepends the directory holding `gater-hook` (built next to the app
