@@ -87,6 +87,12 @@ final class EventFeedView: NSView {
             }
             let surface = event["public_surface"] == .bool(true) ? "⚠︎ " : ""
             detail = "\(surface)\(event["path"]?.stringValue ?? "") \(changes.joined(separator: ", "))"
+        case "ownership":
+            let symbol = (event["symbol"]?.stringValue ?? "").split(separator: "#").last.map(String.init) ?? ""
+            var confidence = ""
+            if case let .number(c)? = event["confidence"] { confidence = String(format: " %.2f", c) }
+            let uncertain = event["status"]?.stringValue == "uncertain" ? " (uncertain)" : ""
+            detail = "\(symbol) → \(event["feature"]?.stringValue ?? "?")\(confidence)\(uncertain)"
         case "done_note":
             detail = "\(event["dish"]?.stringValue ?? "?"): \(event["did"]?.stringValue ?? "")"
         default:

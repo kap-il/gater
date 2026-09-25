@@ -25,6 +25,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Parsing is off the main thread and serialized (the engine keeps
     /// snapshot state).
     private let symbolQueue = DispatchQueue(label: "gater.symbols")
+    /// Jev ownership (spec §4.7); nil without JEV_API_KEY in ~/.gater/.env.
+    private var classifier: OwnershipClassifier?
+    /// Latest decision per symbol id, rebuilt from the log's ownership
+    /// events at launch. Only touched on symbolQueue.
+    private var ownership: [String: (feature: String, status: String)] = [:]
     private var paneManager: PaneManager!
     private var windowController: MainWindowController!
 
@@ -55,6 +60,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         planStore = store
         symbolEngine = SymbolEngine(snapshotDirectory: SymbolEngine.defaultSnapshotDirectory(repoRoot: repoRoot))
+        if let config = JevClient.Config.from(environment: DotEnv.load()) {
+            classifier = OwnershipClassifier(client: JevClient(config: config))
+        }
+        for event in (try? EventLog.replay(path: logPath)) ?? [] where event.kind == "ownership" {
+            if let id = event["symbol"]?.stringValue, let feature = event["feature"]?.stringValue {
+                ownership[id] = (feature, event["status"]?.stringValue ?? "assigned")
+            }
+        }
 
         paneManager = PaneManager(repoRoot: repoRoot) { [weak self] event in self?.record(event) }
         windowController = MainWindowController(paneManager: paneManager)
@@ -125,9 +138,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func analyzeSymbols(for event: GaterEvent) {
         guard event.kind == "edit", let path = event["path"]?.stringValue, path.hasPrefix("/") else { return }
         symbolQueue.async { [weak self] in
-            guard let update = self?.symbolEngine?.fileEdited(absolutePath: path),
-                  let changed = update.event(pane: event.pane) else { return }
-            DispatchQueue.main.async { self?.record(changed) }
+            guard let self, let update = self.symbolEngine?.fileEdited(absolutePath: path) else { return }
+            if let changed = update.event(pane: event.pane) {
+                DispatchQueue.main.async { self.record(changed) }
+            }
+            self.classifyOwnership(update, absolutePath: path)
+        }
+    }
+
+    /// Sends the symbols whose ownership may have changed to Jev: new ones,
+    /// signature changes, anything never classified, and uncertain ones
+    /// whose body changed (more code, maybe a clearer answer). Runs on
+    /// symbolQueue.
+    private func classifyOwnership(_ update: SymbolUpdate, absolutePath: String) {
+        guard let classifier, let plan = planStore?.current else { return }
+        let changed = Dictionary(update.changes.map { ($0.id, $0.change) }, uniquingKeysWith: { a, _ in a })
+        let lines = ((try? String(contentsOfFile: absolutePath, encoding: .utf8)) ?? "")
+            .components(separatedBy: "\n")
+
+        let candidates = update.symbols.filter { symbol in
+            guard let current = ownership[symbol.id] else { return true }
+            switch changed[symbol.id] {
+            case .added?, .signature?: return true
+            case .body?: return current.status == OwnershipDecision.Status.uncertain.rawValue
+            default: return false
+            }
+        }.map { symbol in
+            OwnershipCandidate(id: symbol.id, path: update.path, name: symbol.qualifiedName, kind: symbol.kind.rawValue,
+                               code: lines[max(symbol.startLine - 1, 0)..<min(symbol.endLine, lines.count)].joined(separator: "\n"))
+        }
+        guard !candidates.isEmpty else { return }
+
+        do {
+            let result = try classifier.classifyBlocking(candidates, plan: plan)
+            for decision in result.decisions {
+                ownership[decision.symbolId] = (decision.feature, decision.status.rawValue)
+            }
+            let events = result.decisions.map { $0.event(model: result.model) }
+            DispatchQueue.main.async { [weak self] in events.forEach { self?.record($0) } }
+        } catch {
+            let event = GaterEvent(kind: "ownership_error", extra: ["text": .string("\(error)")])
+            DispatchQueue.main.async { [weak self] in self?.record(event) }
         }
     }
 
