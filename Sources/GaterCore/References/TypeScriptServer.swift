@@ -26,6 +26,10 @@ public struct ReferenceSite: Codable, Equatable, Hashable {
 public final class TypeScriptServer {
     public let worktree: String
     private let client: LSPClient
+    /// Paths already reported to the server. The first report of a path
+    /// says "created": the server ignores "changed" for files it doesn't
+    /// know, so an agent's brand-new file would stay invisible (seen live).
+    private var reportedPaths: Set<String> = []
 
     public init(worktree: String, tsc: String) throws {
         self.worktree = worktree
@@ -79,10 +83,25 @@ public final class TypeScriptServer {
     /// so its program doesn't answer from stale contents.
     public func filesChanged(_ relativePaths: [String]) {
         guard !relativePaths.isEmpty else { return }
-        let changes = relativePaths.map { path -> JSONValue in
+        var changes: [JSONValue] = []
+        for path in relativePaths {
             let absolute = (worktree as NSString).appendingPathComponent(path)
-            let type = FileManager.default.fileExists(atPath: absolute) ? 2 : 3 // changed / deleted
-            return .object(["uri": .string(Self.uri(for: absolute)), "type": .number(Double(type))])
+            let uri = JSONValue.string(Self.uri(for: absolute))
+            func change(_ type: Int) -> JSONValue { .object(["uri": uri, "type": .number(Double(type))]) }
+            if !FileManager.default.fileExists(atPath: absolute) {
+                reportedPaths.remove(path)
+                changes.append(change(3)) // deleted
+            } else if reportedPaths.insert(path).inserted {
+                // First report: we can't tell a brand-new file (needs
+                // "created") from one the server loaded at startup (needs
+                // "changed" to refresh), so send both — changed first, as
+                // "created" after it for a known file is a no-op, while the
+                // reverse order loses the refresh (verified by tests).
+                changes.append(change(2))
+                changes.append(change(1))
+            } else {
+                changes.append(change(2))
+            }
         }
         try? client.notify("workspace/didChangeWatchedFiles", .object(["changes": .array(changes)]))
     }

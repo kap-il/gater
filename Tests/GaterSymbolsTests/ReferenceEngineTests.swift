@@ -86,6 +86,24 @@ final class ReferenceEngineTests: XCTestCase {
         XCTAssertEqual(try engine.references(to: "src/users.ts#getUser", in: dash)?.map(\.line), [4, 5])
     }
 
+    /// Seen live: B creates its calling file *after* B's server started.
+    func testFileCreatedAfterServerStartIsSeen() throws {
+        let dash = try GitWorktree.ensure(delegate: "dash", repoRoot: repo)
+        let engine = ReferenceEngine()
+        defer { engine.stopAll() }
+        XCTAssertEqual(try engine.references(to: "src/users.ts#getUser", in: dash), [], "server up, no callers yet")
+
+        try write("src/dashboard/UserCard.tsx", """
+        import { getUser } from "../users"
+        export function UserCard({ id }: { id: string }) {
+          return <div>{getUser(id).name}</div>
+        }
+        """, in: dash)
+        engine.filesChanged(in: dash, relativePaths: ["src/dashboard/UserCard.tsx"])
+        XCTAssertEqual(try engine.references(to: "src/users.ts#getUser", in: dash)?.map(\.description),
+                       ["src/dashboard/UserCard.tsx:3"])
+    }
+
     func testMissingSymbolOrFile() throws {
         let engine = ReferenceEngine()
         defer { engine.stopAll() }
