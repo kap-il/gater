@@ -1,5 +1,6 @@
 import AppKit
 import GaterCore
+import GaterSymbols
 
 @main
 enum GaterMain {
@@ -20,6 +21,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventLog: EventLog?
     private var eventBus: EventBus?
     private var planStore: PlanStore?
+    private var symbolEngine: SymbolEngine?
+    /// Parsing is off the main thread and serialized (the engine keeps
+    /// snapshot state).
+    private let symbolQueue = DispatchQueue(label: "gater.symbols")
     private var paneManager: PaneManager!
     private var windowController: MainWindowController!
 
@@ -49,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showError("Couldn't write \(store.path.path)", error)
         }
         planStore = store
+        symbolEngine = SymbolEngine(snapshotDirectory: SymbolEngine.defaultSnapshotDirectory(repoRoot: repoRoot))
 
         paneManager = PaneManager(repoRoot: repoRoot) { [weak self] event in self?.record(event) }
         windowController = MainWindowController(paneManager: paneManager)
@@ -115,12 +121,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController?.eventFeed.append(stored)
     }
 
+    /// Edit → re-parse the file → `symbols_changed` (spec §4.6).
+    private func analyzeSymbols(for event: GaterEvent) {
+        guard event.kind == "edit", let path = event["path"]?.stringValue, path.hasPrefix("/") else { return }
+        symbolQueue.async { [weak self] in
+            guard let update = self?.symbolEngine?.fileEdited(absolutePath: path),
+                  let changed = update.event(pane: event.pane) else { return }
+            DispatchQueue.main.async { self?.record(changed) }
+        }
+    }
+
     private func startEventBus() {
         let socketPath = ProcessInfo.processInfo.environment["GATER_COLLECTOR"] ?? EventBus.defaultSocketPath()
         // The bus appends hook events to the log itself; the callback only
         // feeds the live view.
         let bus = EventBus(socketPath: socketPath, eventLog: eventLog) { [weak self] event in
             self?.planStore?.apply(event)
+            self?.analyzeSymbols(for: event)
             DispatchQueue.main.async { self?.windowController?.eventFeed.append(event) }
         }
         do {

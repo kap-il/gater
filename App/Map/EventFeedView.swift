@@ -79,6 +79,14 @@ final class EventFeedView: NSView {
             detail = event["path"]?.stringValue.map { ($0 as NSString).lastPathComponent } ?? ""
         case "command":
             detail = event["command"]?.stringValue ?? ""
+        case "symbols_changed":
+            let changes = (event.fields["changes"]?.arrayValue ?? []).compactMap { change -> String? in
+                guard let symbol = change.value(atPath: "symbol")?.stringValue,
+                      let kind = change.value(atPath: "change")?.stringValue else { return nil }
+                return "\(symbol):\(kind)"
+            }
+            let surface = event["public_surface"] == .bool(true) ? "⚠︎ " : ""
+            detail = "\(surface)\(event["path"]?.stringValue ?? "") \(changes.joined(separator: ", "))"
         case "done_note":
             detail = "\(event["dish"]?.stringValue ?? "?"): \(event["did"]?.stringValue ?? "")"
         default:
