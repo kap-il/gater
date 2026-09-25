@@ -19,6 +19,7 @@ enum GaterMain {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventLog: EventLog?
     private var eventBus: EventBus?
+    private var planStore: PlanStore?
     private var paneManager: PaneManager!
     private var windowController: MainWindowController!
 
@@ -38,6 +39,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             showError("Couldn't open \(logPath.path)", error)
         }
+
+        // The plan is derived state: always rebuilt from the log, never
+        // trusted from disk (spec §4.5).
+        let store = PlanStore(path: PlanStore.defaultPath(repoRoot: repoRoot))
+        do {
+            try store.rebuild(from: (try? EventLog.replay(path: logPath)) ?? [])
+        } catch {
+            showError("Couldn't write \(store.path.path)", error)
+        }
+        planStore = store
 
         paneManager = PaneManager(repoRoot: repoRoot) { [weak self] event in self?.record(event) }
         windowController = MainWindowController(paneManager: paneManager)
@@ -99,6 +110,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Events Gater itself produces (pane lifecycle, human input).
     private func record(_ event: GaterEvent) {
         let stored = (try? eventLog?.append(event)) ?? event
+        planStore?.apply(stored)
         windowController?.eventFeed.append(stored)
     }
 
@@ -107,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The bus appends hook events to the log itself; the callback only
         // feeds the live view.
         let bus = EventBus(socketPath: socketPath, eventLog: eventLog) { [weak self] event in
+            self?.planStore?.apply(event)
             DispatchQueue.main.async { self?.windowController?.eventFeed.append(event) }
         }
         do {

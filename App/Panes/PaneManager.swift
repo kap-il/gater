@@ -76,6 +76,9 @@ final class PaneManager {
             "GATER_PANE_ID": id,
             "GATER_ROLE": role.rawValue,
             "GATER_WORKTREE": worktree,
+            // Where gater-hook finds .gater/plan.json (delegates run in
+            // sibling worktrees, not the repo itself).
+            "GATER_REPO": repoRoot,
         ]
         if let path = pathWithHookDirectory() { env["PATH"] = path }
         env["GATER_DELEGATION_TOOL_NAME"] = delegationTool
