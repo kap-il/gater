@@ -58,6 +58,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .split(separator: ",").map(String.init) where !name.isEmpty {
             windowController.setCollapsed(true, paneId: "delegate-\(name)")
         }
+        // GATER_DEBUG_TOGGLE=a,b: collapse those at 0.7s and expand them
+        // again at 1.4s, to exercise the round trip on laid-out panes.
+        let toggle = (ProcessInfo.processInfo.environment["GATER_DEBUG_TOGGLE"] ?? "")
+            .split(separator: ",").map(String.init)
+        for (delay, collapsed) in [(0.7, true), (1.4, false)] where !toggle.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                for name in toggle { self?.windowController.setCollapsed(collapsed, paneId: "delegate-\(name)") }
+            }
+        }
         NSApp.activate(ignoringOtherApps: true)
         scheduleDebugSnapshot()
     }

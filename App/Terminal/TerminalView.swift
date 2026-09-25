@@ -62,7 +62,37 @@ final class TerminalView: NSView {
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        let size = Self.gridSize(for: newSize, font: font, padding: padding)
+        scheduleGridResize()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        scheduleGridResize()
+    }
+
+    private var pendingResize: DispatchWorkItem?
+
+    /// PTY resizes are debounced so only the settled size reaches the
+    /// program. Split-view layout (collapsing/expanding tiles, dragging a
+    /// divider, live window resizing) passes panes through transient sizes
+    /// — down to a single row — and every SIGWINCH makes TUIs like Claude
+    /// Code redraw; a burst of them pushes their UI into scrollback and
+    /// leaves the screen mangled.
+    private func scheduleGridResize() {
+        pendingResize?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.applyGridResize() }
+        pendingResize = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
+    }
+
+    private func applyGridResize() {
+        // A collapsed (hidden) pane, or one squeezed mid-layout, keeps the
+        // child's current size rather than telling it it's 1 row tall.
+        let minHeight = font.cellSize.height * 2 + padding * 2
+        let minWidth = font.cellSize.width * 10 + padding * 2
+        guard !isHiddenOrHasHiddenAncestor, bounds.height >= minHeight, bounds.width >= minWidth else { return }
+
+        let size = Self.gridSize(for: bounds.size, font: font, padding: padding)
         if lastGrid?.cols != size.cols || lastGrid?.rows != size.rows {
             lastGrid = (size.cols, size.rows)
             session.resize(size)
