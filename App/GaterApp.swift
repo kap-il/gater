@@ -34,6 +34,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let references = ReferenceEngine()
     /// Agent pane id → worktree, mirrored from PaneManager. symbolQueue only.
     private var agentWorktrees: [String: String] = [:]
+    /// Canonical worktree → the commit it started from (symbol baseline)
+    /// and the HEAD last scanned after a shell command. symbolQueue only.
+    private var worktreeBase: [String: String] = [:]
+    private var worktreeScanned: [String: String] = [:]
     /// Public-surface changes still in play: symbol id → the pane that
     /// changed it and how. symbolQueue only.
     private var surfaceChanges: [String: (pane: String?, change: String)] = [:]
@@ -169,7 +173,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         paneManager.onPaneAdded = { [weak self] pane in
             added?(pane)
             guard pane.role != .shell else { return }
-            self?.symbolQueue.async { self?.agentWorktrees[pane.id] = pane.worktree }
+            self?.symbolQueue.async {
+                guard let self else { return }
+                self.agentWorktrees[pane.id] = pane.worktree
+                let key = SymbolEngine.canonical(pane.worktree)
+                if self.worktreeBase[key] == nil, let head = GitWorktree.head(of: pane.worktree) {
+                    self.worktreeBase[key] = head
+                    self.worktreeScanned[key] = head
+                }
+            }
         }
         paneManager.onPaneRemoved = { [weak self] pane in
             removed?(pane)
@@ -185,17 +197,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// agent's worktree (§4.8).
     private func analyzeSymbols(for event: GaterEvent) {
         if event.kind == "delegation" { warmLanguageServer(for: event) }
-        guard event.kind == "edit", let path = event["path"]?.stringValue, path.hasPrefix("/") else { return }
-        symbolQueue.async { [weak self] in
-            guard let self, let update = self.symbolEngine?.fileEdited(absolutePath: path) else { return }
-            self.references.filesChanged(in: update.worktree, relativePaths: [update.path])
-            if let changed = update.event(pane: event.pane) {
-                DispatchQueue.main.async { self.record(changed) }
-            }
-            self.classifyOwnership(update, absolutePath: path)
-            self.findReferences(for: update, from: event.pane)
-            self.checkNewUses(in: update, absolutePath: path, by: event.pane)
+        if event.kind == "command", let pane = event.pane {
+            symbolQueue.async { [weak self] in self?.scanAfterCommand(pane: pane) }
+            return
         }
+        guard event.kind == "edit", let path = event["path"]?.stringValue, path.hasPrefix("/") else { return }
+        symbolQueue.async { [weak self] in self?.fileChanged(absolutePath: path, pane: event.pane) }
+    }
+
+    /// Shell commands edit files too (`cat > f`, sed, codegen) and no
+    /// Edit/Write hook reports them — seen live, where both delegates wrote
+    /// their code with heredocs and committed in the same command. After
+    /// each agent command, ask git what changed in its worktree since the
+    /// last scan (commits in between + uncommitted/untracked files).
+    /// Runs on symbolQueue.
+    private func scanAfterCommand(pane: String) {
+        guard let worktree = agentWorktrees[pane] else { return }
+        let key = SymbolEngine.canonical(worktree)
+        guard let since = worktreeScanned[key] ?? worktreeBase[key] else { return }
+        let files = GitWorktree.changedFiles(in: worktree, since: since)
+        if let head = GitWorktree.head(of: worktree) { worktreeScanned[key] = head }
+        for file in files where SymbolExtractor.supports(path: file) {
+            fileChanged(absolutePath: (worktree as NSString).appendingPathComponent(file), pane: pane)
+        }
+    }
+
+    /// One changed file → symbols → ownership / references / new uses.
+    /// Runs on symbolQueue.
+    private func fileChanged(absolutePath path: String, pane: String?) {
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        let root = GitWorktree.repoRoot(containing: (path as NSString).deletingLastPathComponent).map(SymbolEngine.canonical)
+        let baseline = root.flatMap { worktreeBase[$0] } ?? "HEAD"
+        guard let update = symbolEngine?.fileEdited(absolutePath: path, baseline: baseline) else { return }
+        references.filesChanged(in: update.worktree, relativePaths: [update.path])
+        if let changed = update.event(pane: pane) {
+            DispatchQueue.main.async { [weak self] in self?.record(changed) }
+        }
+        classifyOwnership(update, absolutePath: path)
+        findReferences(for: update, from: pane)
+        checkNewUses(in: update, absolutePath: path, by: pane)
     }
 
     // MARK: - Overlaps (spec §4.9)

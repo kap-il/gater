@@ -68,6 +68,13 @@ public enum HookProcessor {
         case ("PreToolUse", env.delegationTool?):
             guard env.role == "orchestrator" else { return HookOutcome(events: [], exitCode: 0, stderr: nil) }
             let text = toolInput?.value(atPath: "message")?.stringValue ?? ""
+            // Asking to be notified when a delegate goes idle isn't a
+            // delegation (seen live: the orchestrator's idle subscriptions
+            // were blocked). Only messages that carry work need GATER/1.
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if toolInput?.value(atPath: "notify_when_idle") == .bool(true), !trimmed.hasPrefix("GATER/1") {
+                return HookOutcome(events: [], exitCode: 0, stderr: nil)
+            }
             switch GaterProtocol.parseDelegationMessage(text) {
             case let .failure(error):
                 let message = """

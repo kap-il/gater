@@ -39,6 +39,13 @@ final class HookProcessorTests: XCTestCase {
         XCTAssertEqual(outcome, HookOutcome(events: [], exitCode: 0, stderr: nil))
     }
 
+    func testIdleNotificationRequestIsNotBlocked() {
+        var payload = send("PreToolUse", message: "ping me when idle")
+        payload["tool_input"] = .object(["to": .string("delegate-auth"), "message": .string("ping me when idle"),
+                                         "notify_when_idle": .bool(true)])
+        XCTAssertEqual(HookProcessor.process(payload: payload, env: orch).exitCode, 0)
+    }
+
     func testDelegateSendsAreNeverBlocked() {
         let outcome = HookProcessor.process(payload: send("PreToolUse", message: "done, see note", to: "orch"), env: delegate)
         XCTAssertEqual(outcome.exitCode, 0)

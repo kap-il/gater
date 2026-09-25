@@ -116,6 +116,31 @@ public enum GitWorktree {
         return target
     }
 
+    /// The commit `HEAD` points at, or nil (no commits / not a repo).
+    public static func head(of worktree: String) -> String? {
+        guard let result = try? git(["rev-parse", "--verify", "--quiet", "HEAD"], in: worktree),
+              result.status == 0 else { return nil }
+        let sha = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return sha.isEmpty ? nil : sha
+    }
+
+    /// Files that changed in `worktree` since commit `since`: committed in
+    /// between, plus modified, staged, or untracked now. Paths are relative.
+    /// Catches edits made through shell commands, which no Edit/Write hook
+    /// reports.
+    public static func changedFiles(in worktree: String, since: String) -> [String] {
+        var files = Set<String>()
+        if let diff = try? git(["diff", "--name-only", since, "HEAD"], in: worktree), diff.status == 0 {
+            diff.output.split(separator: "\n").forEach { files.insert(String($0)) }
+        }
+        if let status = try? git(["status", "--porcelain", "-uall", "--no-renames"], in: worktree), status.status == 0 {
+            for line in status.output.split(separator: "\n") where line.count > 3 {
+                files.insert(String(line.dropFirst(3)))
+            }
+        }
+        return files.sorted()
+    }
+
     /// Adds `pattern` to the repository's `info/exclude` — ignored in every
     /// worktree, never committed, invisible to the user's .gitignore.
     public static func exclude(pattern: String, comment: String, in directory: String) throws {

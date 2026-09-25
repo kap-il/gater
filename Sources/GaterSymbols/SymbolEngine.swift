@@ -31,7 +31,12 @@ public final class SymbolEngine {
     /// Handles an edit to `absolutePath`. Returns nil for files the engine
     /// doesn't understand or can't read; otherwise the (possibly empty)
     /// set of changes.
-    public func fileEdited(absolutePath: String) -> SymbolUpdate? {
+    ///
+    /// `baseline` is the git ref a file's first edit is diffed against —
+    /// normally the commit the worktree started from, because by the time
+    /// Gater looks, an agent may already have committed the change (a Bash
+    /// `cat > f && git commit` does both at once), making HEAD useless.
+    public func fileEdited(absolutePath: String, baseline: String = "HEAD") -> SymbolUpdate? {
         guard SymbolExtractor.supports(path: absolutePath),
               let source = try? String(contentsOfFile: absolutePath, encoding: .utf8),
               let worktree = GitWorktree.repoRoot(containing: (absolutePath as NSString).deletingLastPathComponent)
@@ -41,7 +46,7 @@ public final class SymbolEngine {
         guard let symbols = try? SymbolExtractor.symbols(source: source, path: relative) else { return nil }
 
         var files = loadSnapshot(worktree: worktree)
-        let previous = files[relative] ?? baseline(relative: relative, worktree: worktree)
+        let previous = files[relative] ?? symbolsAt(ref: baseline, relative: relative, worktree: worktree)
         let changes = SymbolDiff.diff(old: previous, new: symbols)
 
         files[relative] = symbols
@@ -50,9 +55,9 @@ public final class SymbolEngine {
         return SymbolUpdate(path: relative, worktree: worktree, symbols: symbols, changes: changes)
     }
 
-    /// The file's symbols as of HEAD in its worktree (empty for new files).
-    private func baseline(relative: String, worktree: String) -> [CodeSymbol] {
-        guard let result = try? GitWorktree.git(["show", "HEAD:\(relative)"], in: worktree),
+    /// The file's symbols at `ref` in its worktree (empty for new files).
+    private func symbolsAt(ref: String, relative: String, worktree: String) -> [CodeSymbol] {
+        guard let result = try? GitWorktree.git(["show", "\(ref):\(relative)"], in: worktree),
               result.status == 0 else { return [] }
         return (try? SymbolExtractor.symbols(source: result.output, path: relative)) ?? []
     }
