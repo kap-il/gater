@@ -96,4 +96,15 @@ final class GitWorktreeTests: XCTestCase {
         XCTAssertEqual(try GitWorktree.ensure(delegate: "auth", repoRoot: repo), path)
         XCTAssertTrue(FileManager.default.fileExists(atPath: path + "/done.txt"), "back on gater/auth with its commits")
     }
+
+    /// Seen live: `git init` without a commit gave delegates empty branches.
+    func testRefusesARepoWithNoCommits() throws {
+        let empty = sandbox.appendingPathComponent("empty").path
+        try FileManager.default.createDirectory(atPath: empty, withIntermediateDirectories: true)
+        XCTAssertEqual(try GitWorktree.git(["init", "-q"], in: empty).status, 0)
+        XCTAssertThrowsError(try GitWorktree.ensure(delegate: "auth", repoRoot: empty)) {
+            XCTAssertEqual($0 as? GitWorktreeError, .noCommits(empty))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.appendingPathComponent("empty-auth").path))
+    }
 }

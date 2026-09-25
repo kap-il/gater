@@ -4,6 +4,7 @@ public enum GitWorktreeError: Error, CustomStringConvertible, Equatable {
     case invalidName(String)
     case notARepository(String)
     case pathOccupied(String)
+    case noCommits(String)
     case gitFailed(arguments: [String], status: Int32, output: String)
 
     public var description: String {
@@ -14,6 +15,8 @@ public enum GitWorktreeError: Error, CustomStringConvertible, Equatable {
             return "\(path) is not inside a git repository."
         case let .pathOccupied(path):
             return "\(path) already exists and is not a worktree of this repository."
+        case let .noCommits(path):
+            return "\(path) has no commits yet. Delegates branch from the current commit, so make one first (git add . && git commit -m init)."
         case let .gitFailed(arguments, status, output):
             return "git \(arguments.joined(separator: " ")) exited \(status): \(output)"
         }
@@ -79,6 +82,13 @@ public enum GitWorktree {
         guard isValidName(name) else { throw GitWorktreeError.invalidName(name) }
         guard let root = self.repoRoot(containing: repoRoot) else {
             throw GitWorktreeError.notARepository(repoRoot)
+        }
+
+        // Delegates branch from HEAD. With no commit yet, recent git quietly
+        // makes an *empty* orphan branch, so the delegate starts with none
+        // of the repo's files (seen live). Refuse instead.
+        guard (try? git(["rev-parse", "--verify", "--quiet", "HEAD"], in: root))?.status == 0 else {
+            throw GitWorktreeError.noCommits(root)
         }
 
         // Forget worktrees whose folders were deleted by hand ("prunable"),
