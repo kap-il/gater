@@ -97,6 +97,15 @@ final class EventFeedView: NSView {
             let symbol = (event["symbol"]?.stringValue ?? "").split(separator: "#").last.map(String.init) ?? ""
             let sites = (event.fields["sites"]?.arrayValue ?? []).compactMap(\.stringValue)
             detail = "\(symbol) (\(event["change"]?.stringValue ?? "")) used in \(event["in_pane"]?.stringValue ?? "?"): \(sites.joined(separator: ", "))"
+        case "overlap":
+            let panes = (event.fields["panes"]?.arrayValue ?? []).compactMap(\.stringValue)
+            detail = "⚠︎ \(event["node"]?.stringValue ?? "?") \(event["type"]?.stringValue ?? "") \(panes.joined(separator: " ↔ "))"
+        case "review":
+            var confidence = ""
+            if case let .number(c)? = event["confidence"] { confidence = String(format: " %.2f", c) }
+            detail = "Jev: \(event["verdict"]?.stringValue ?? "?")\(confidence)"
+        case "wake":
+            detail = (event["text"]?.stringValue ?? "").split(separator: "\n").first.map(String.init) ?? ""
         case "done_note":
             detail = "\(event["dish"]?.stringValue ?? "?"): \(event["did"]?.stringValue ?? "")"
         default:

@@ -34,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let references = ReferenceEngine()
     /// Agent pane id → worktree, mirrored from PaneManager. symbolQueue only.
     private var agentWorktrees: [String: String] = [:]
+    /// Overlap detection (spec §4.9). symbolQueue only.
+    private var overlaps = OverlapDetector()
+    private var reviewer: ConflictReviewer?
     private var paneManager: PaneManager!
     private var windowController: MainWindowController!
 
@@ -66,7 +69,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         symbolEngine = SymbolEngine(snapshotDirectory: SymbolEngine.defaultSnapshotDirectory(repoRoot: repoRoot))
         if let config = JevClient.Config.from(environment: DotEnv.load()) {
             classifier = OwnershipClassifier(client: JevClient(config: config))
+            reviewer = ConflictReviewer(client: JevClient(config: config))
         }
+        // Rebuild occupancy and remember what was already reported.
+        let history = (try? EventLog.replay(path: logPath)) ?? []
+        overlaps.replay(history, plan: store.current)
         for event in (try? EventLog.replay(path: logPath)) ?? [] where event.kind == "ownership" {
             if let id = event["symbol"]?.stringValue, let feature = event["feature"]?.stringValue {
                 ownership[id] = (feature, event["status"]?.stringValue ?? "assigned")
@@ -138,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let stored = (try? eventLog?.append(event)) ?? event
         planStore?.apply(stored)
         windowController?.eventFeed.append(stored)
+        symbolQueue.async { [weak self] in self?.detectOverlaps(stored) }
     }
 
     /// Mirrors agent panes into symbolQueue state, wrapping the window
@@ -175,6 +183,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.classifyOwnership(update, absolutePath: path)
             self.findReferences(for: update, from: event.pane)
         }
+    }
+
+    // MARK: - Overlaps (spec §4.9)
+
+    /// Runs on symbolQueue: feed the detector, and for each new overlap
+    /// review it with Jev, log it, and wake the orchestrator when the
+    /// changes conflict or Jev isn't sure.
+    private func detectOverlaps(_ event: GaterEvent) {
+        guard ["ownership", "symbols_changed", "references"].contains(event.kind ?? ""),
+              let plan = planStore?.current else { return }
+        for overlap in overlaps.apply(event, plan: plan) {
+            let input = reviewInput(for: overlap, plan: plan)
+            var verdict: ReviewVerdict?
+            var reviewError: String?
+            if let reviewer {
+                do { verdict = try reviewer.reviewBlocking(input) } catch { reviewError = "\(error)" }
+            }
+            // No verdict (no Jev key, or Jev failed) → wake: a human-grade
+            // decision beats a silent miss.
+            let wake = verdict?.shouldWake() ?? true
+            let text = WakeMessage.render(input, verdict: verdict)
+
+            var events = [overlap.event]
+            if let verdict { events.append(verdict.event(overlap: overlap)) }
+            if let reviewError { events.append(GaterEvent(kind: "review_error", extra: ["text": .string(reviewError)])) }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                events.forEach { self.record($0) }
+                guard wake, let orchestrator = self.paneManager.orchestrator else { return }
+                orchestrator.inject(text: text)
+                self.record(GaterEvent(kind: "wake", extra: [
+                    "pane": .string(orchestrator.id), "overlap": .string(overlap.key), "text": .string(text),
+                ]))
+            }
+        }
+    }
+
+    /// Gathers what the review and the wake message need from the plan and
+    /// the involved worktrees. Runs on symbolQueue.
+    private func reviewInput(for overlap: Overlap, plan: Plan) -> ReviewInput {
+        let parties = overlap.panes.map { pane -> OverlapParty in
+            let dish = plan.currentDish(forPane: pane)
+            return OverlapParty(pane: pane, dish: dish?.id, directive: dish?.directive)
+        }
+        var input = ReviewInput(overlap: overlap, parties: parties)
+
+        func read(_ pane: String?, _ path: String) -> String? {
+            guard let pane, let worktree = agentWorktrees[pane] else { return nil }
+            return try? String(contentsOfFile: (worktree as NSString).appendingPathComponent(path), encoding: .utf8)
+        }
+
+        switch overlap.kind {
+        case .publicSurface:
+            guard let symbol = overlap.symbol, let hash = symbol.lastIndex(of: "#") else { break }
+            let path = String(symbol[..<hash])
+            if let source = read(overlap.fromPane, path),
+               let after = SymbolExtractor.describe(symbolId: symbol, source: source, path: path) {
+                input.newSignature = after.signature
+                input.newCode = after.code
+            }
+            if let source = read(overlap.inPane, path),
+               let before = SymbolExtractor.describe(symbolId: symbol, source: source, path: path) {
+                input.oldSignature = before.signature
+            }
+            input.siteLines = overlap.sites.map { site in
+                let parts = site.split(separator: ":")
+                guard parts.count >= 2, let line = Int(parts.last!),
+                      let text = read(overlap.inPane, parts.dropLast().joined(separator: ":")) else { return site }
+                let lines = text.components(separatedBy: "\n")
+                return line - 1 < lines.count ? "\(site): \(lines[line - 1].trimmingCharacters(in: .whitespaces))" : site
+            }
+        case .sharedFeature:
+            for pane in overlap.panes {
+                input.changesByPane[pane] = overlaps.symbols(changedBy: pane, in: overlap.feature).compactMap { id in
+                    guard let hash = id.lastIndex(of: "#") else { return nil }
+                    let path = String(id[..<hash])
+                    return read(pane, path).flatMap { SymbolExtractor.describe(symbolId: id, source: $0, path: path)?.code }
+                }
+            }
+        }
+        return input
     }
 
     /// Spec §4.8: a worktree's server starts when a delegation begins there,
@@ -259,6 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let bus = EventBus(socketPath: socketPath, eventLog: eventLog) { [weak self] event in
             self?.planStore?.apply(event)
             self?.analyzeSymbols(for: event)
+            self?.symbolQueue.async { self?.detectOverlaps(event) }
             DispatchQueue.main.async { self?.windowController?.eventFeed.append(event) }
         }
         do {
