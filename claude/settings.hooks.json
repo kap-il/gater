@@ -1,0 +1,54 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "REPLACE_WITH_CROSS_SESSION_SEND_TOOL_NAME",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gater-hook"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "REPLACE_WITH_CROSS_SESSION_SEND_TOOL_NAME",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gater-hook"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gater-hook"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gater-hook"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gater-hook"
+          }
+        ]
+      }
+    ]
+  }
+}
