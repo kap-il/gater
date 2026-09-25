@@ -1,0 +1,11 @@
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.gater/events.jsonl
+.gater/plan.json
+.gater/snapshots/*
+!.gater/snapshots/.gitkeep
+.DS_Store
+Vendor/ghostty/build/
