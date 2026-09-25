@@ -56,7 +56,7 @@ public struct LaunchConfig: Sendable {
         return "/bin/zsh"
     }
 
-    static func shellQuote(_ s: String) -> String {
+    public static func shellQuote(_ s: String) -> String {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }

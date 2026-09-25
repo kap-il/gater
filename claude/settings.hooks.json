@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "REPLACE_WITH_CROSS_SESSION_SEND_TOOL_NAME",
+        "matcher": "SendMessage",
         "hooks": [
           {
             "type": "command",
@@ -13,7 +13,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "REPLACE_WITH_CROSS_SESSION_SEND_TOOL_NAME",
+        "matcher": "SendMessage",
         "hooks": [
           {
             "type": "command",

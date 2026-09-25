@@ -65,12 +65,23 @@ final class EventFeedView: NSView {
         let kind = event.kind ?? "?"
         let pane = event.pane ?? "-"
         var detail = ""
-        if let path = event["path"]?.stringValue ?? event.fields["tool_input"]?.value(atPath: "file_path")?.stringValue {
-            detail = path
-        } else if let text = event["text"]?.stringValue {
-            detail = text
-        } else if let tool = event["tool_name"]?.stringValue {
-            detail = tool
+        switch kind {
+        case "delegation":
+            let gater = event.fields["gater"]
+            let type = gater?.value(atPath: "type")?.stringValue ?? "?"
+            let id = gater?.value(atPath: "id")?.stringValue ?? "?"
+            let feature = gater?.value(atPath: "feature")?.stringValue.map { " \($0)" } ?? ""
+            detail = "\(type) \(id)\(feature) → \(event["to"]?.stringValue ?? "?")"
+        case "message":
+            detail = "→ \(event["to"]?.stringValue ?? "?"): \(event["summary"]?.stringValue ?? "")"
+        case "edit":
+            detail = event["path"]?.stringValue.map { ($0 as NSString).lastPathComponent } ?? ""
+        case "command":
+            detail = event["command"]?.stringValue ?? ""
+        case "done_note":
+            detail = "\(event["dish"]?.stringValue ?? "?"): \(event["did"]?.stringValue ?? "")"
+        default:
+            detail = event["text"]?.stringValue ?? event["tool_name"]?.stringValue ?? ""
         }
         return "\(time)  \(kind.padding(toLength: 18, withPad: " ", startingAt: 0)) \(pane.padding(toLength: 16, withPad: " ", startingAt: 0)) \(detail)"
     }

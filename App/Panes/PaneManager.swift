@@ -37,11 +37,21 @@ final class PaneManager {
 
     // MARK: - Spawning
 
+    /// `claude --name <pane id>`: the session's display name matches the
+    /// pane id, so the orchestrator can address a delegate predictably
+    /// (SendMessage `to`) and it lines up with "pane" in the event log.
+    /// Custom agent commands that aren't claude are run as-is.
+    private func agentCommand(named id: String) -> String {
+        let program = agentCommand.split(separator: " ").first.map { ($0 as NSString).lastPathComponent }
+        guard program == "claude" else { return agentCommand }
+        return "\(agentCommand) --name \(LaunchConfig.shellQuote(id))"
+    }
+
     @discardableResult
     func spawnOrchestrator() throws -> Pane {
         if let existing = orchestrator { return existing }
         return try spawn(id: "orch", role: .orchestrator, name: "orchestrator",
-                         worktree: repoRoot, command: agentCommand)
+                         worktree: repoRoot, command: agentCommand(named: "orch"))
     }
 
     /// "New delegate": creates `../<repo>-<name>` on `gater/<name>` and
@@ -51,7 +61,7 @@ final class PaneManager {
         let id = "delegate-\(name)"
         if let existing = pane(id: id) { return existing }
         let worktree = try GitWorktree.ensure(delegate: name, repoRoot: repoRoot)
-        return try spawn(id: id, role: .delegate, name: name, worktree: worktree, command: agentCommand)
+        return try spawn(id: id, role: .delegate, name: name, worktree: worktree, command: agentCommand(named: id))
     }
 
     @discardableResult
