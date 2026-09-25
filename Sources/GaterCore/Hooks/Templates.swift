@@ -22,6 +22,8 @@ This skill only covers **how** to format a message once you've already decided t
 
 Send with the `SendMessage` tool. Gater names each delegate session `delegate-<name>` (for example `delegate-auth`); use that as `to`.
 
+If no session with that name exists yet, sending a `type: delegate` message to it opens one: Gater creates the worktree (branch `gater/<name>`), starts the session, and delivers your message once it's ready. Names use letters, digits, `.`, `_` or `-`.
+
 ## Message format
 
 Every message you send as the orchestrator must lead with a `GATER/1` block:

@@ -8,6 +8,17 @@ public struct HookOutcome: Equatable {
     public var exitCode: Int32
     /// Fed back to Claude when blocking.
     public var stderr: String?
+    /// A delegate pane that must be open (and its session ready) before
+    /// this send may proceed: the orchestrator is delegating to a
+    /// `delegate-<name>` that may not exist yet, so Gater spawns it.
+    public var ensurePane: String?
+
+    public init(events: [GaterEvent], exitCode: Int32, stderr: String?, ensurePane: String? = nil) {
+        self.events = events
+        self.exitCode = exitCode
+        self.stderr = stderr
+        self.ensurePane = ensurePane
+    }
 }
 
 /// The pure logic behind gater-hook: hook payload + pane environment →
@@ -92,7 +103,14 @@ public enum HookProcessor {
                     Only the GATER/1 block needs fixing; resend with the corrected id or type.
                     """)
                 }
-                return HookOutcome(events: [], exitCode: 0, stderr: nil)
+                // New work for a `delegate-<name>` session: make sure it
+                // exists — Gater opens the pane and worktree if needed.
+                var ensure: String?
+                if message.type == .delegate, let to = toolInput?.value(atPath: "to")?.stringValue,
+                   to.hasPrefix("delegate-"), GitWorktree.isValidName(String(to.dropFirst("delegate-".count))) {
+                    ensure = to
+                }
+                return HookOutcome(events: [], exitCode: 0, stderr: nil, ensurePane: ensure)
             }
 
         // The send went through: log it. Orchestrator sends that parse as

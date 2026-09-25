@@ -36,7 +36,8 @@ final class HookProcessorTests: XCTestCase {
 
     func testOrchestratorValidSendPassesPreToolUseSilently() {
         let outcome = HookProcessor.process(payload: send("PreToolUse", message: validDelegation), env: orch)
-        XCTAssertEqual(outcome, HookOutcome(events: [], exitCode: 0, stderr: nil))
+        XCTAssertEqual(outcome, HookOutcome(events: [], exitCode: 0, stderr: nil, ensurePane: "delegate-auth"),
+                       "new work for delegate-auth: Gater makes sure the pane exists")
     }
 
     func testIdleNotificationRequestIsNotBlocked() {
@@ -239,4 +240,59 @@ final class PaneAddressResolverTests: XCTestCase {
         XCTAssertNil(PaneAddressResolver.environmentVariable("MISSING", ofProcess: child.processIdentifier))
     }
     #endif
+}
+
+final class EnsurePaneTests: XCTestCase {
+    private let orch = HookProcessor.Environment(paneId: "orch", role: "orchestrator")
+
+    private func pre(_ message: String, to: String) -> [String: JSONValue] {
+        ["hook_event_name": .string("PreToolUse"), "tool_name": .string("SendMessage"),
+         "tool_input": .object(["to": .string(to), "message": .string(message)])]
+    }
+
+    func testDelegateToDelegatePaneAsksGaterToEnsureIt() {
+        let block = "GATER/1\ntype: delegate\nid: d-001\nfeature: Auth\ndirective: expiry\n---\ngo"
+        XCTAssertEqual(HookProcessor.process(payload: pre(block, to: "delegate-auth"), env: orch).ensurePane, "delegate-auth")
+        XCTAssertNil(HookProcessor.process(payload: pre(block, to: "some-session"), env: orch).ensurePane, "not a Gater delegate name")
+        XCTAssertNil(HookProcessor.process(payload: pre(block, to: "delegate-bad name"), env: orch).ensurePane)
+    }
+
+    func testFollowUpsDontSpawn() {
+        let instruct = "GATER/1\ntype: instruct\nid: d-001\ndirective: fix\n---\ngo"
+        XCTAssertNil(HookProcessor.process(payload: pre(instruct, to: "delegate-auth"), env: orch).ensurePane)
+    }
+}
+
+final class ClaudeTrustTests: XCTestCase {
+    private var config: URL!
+
+    override func setUpWithError() throws {
+        config = FileManager.default.temporaryDirectory.appendingPathComponent("claude-\(UUID().uuidString).json")
+        try #"{"numStartups": 3, "projects": {"/w/app": {"hasTrustDialogAccepted": true, "allowedTools": ["x"]}, "/w/other": {"hasTrustDialogAccepted": false}}}"#
+            .write(to: config, atomically: true, encoding: .utf8)
+    }
+
+    override func tearDownWithError() throws { try? FileManager.default.removeItem(at: config) }
+
+    func testTrustIsInheritedFromParents() {
+        XCTAssertTrue(ClaudeTrust.isTrusted("/w/app", config: config))
+        XCTAssertTrue(ClaudeTrust.isTrusted("/w/app/src", config: config))
+        XCTAssertFalse(ClaudeTrust.isTrusted("/w/other", config: config))
+        XCTAssertFalse(ClaudeTrust.isTrusted("/w/app-auth", config: config), "a sibling worktree isn't inside the repo")
+    }
+
+    func testTrustingAWorktreePreservesEverythingElse() throws {
+        try ClaudeTrust.trustWorktree("/w/app-auth", createdFrom: "/w/app", config: config)
+        XCTAssertTrue(ClaudeTrust.isTrusted("/w/app-auth", config: config))
+        let json = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: config))
+        XCTAssertEqual(json.value(atPath: "numStartups"), .number(3))
+        XCTAssertEqual(json.objectValue?["projects"]?.objectValue?["/w/app"]?.value(atPath: "allowedTools")?.arrayValue?.count, 1)
+    }
+
+    func testRefusesWhenTheRepoIsntTrusted() {
+        XCTAssertThrowsError(try ClaudeTrust.trustWorktree("/w/other-x", createdFrom: "/w/other", config: config)) {
+            XCTAssertEqual($0 as? ClaudeTrust.TrustError, .repositoryNotTrusted("/w/other"))
+        }
+        XCTAssertFalse(ClaudeTrust.isTrusted("/w/other-x", config: config))
+    }
 }

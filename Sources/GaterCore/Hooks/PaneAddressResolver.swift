@@ -15,6 +15,21 @@ public enum PaneAddressResolver {
         return environmentVariable("GATER_PANE_ID", ofProcess: pid)
     }
 
+    /// Where Claude Code sessions expose their cross-session sockets
+    /// (`<pid>.sock`); a session appears here once it can receive messages.
+    public static var sessionSocketDirectory = "/tmp/cc-socks"
+
+    /// Whether a Claude session running in Gater pane `pane` is up and
+    /// able to receive SendMessage.
+    public static func isSessionReady(pane: String) -> Bool {
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: sessionSocketDirectory) else { return false }
+        for file in files where file.hasSuffix(".sock") {
+            guard let pid = Int32(file.dropLast(".sock".count)), kill(pid, 0) == 0 else { continue }
+            if environmentVariable("GATER_PANE_ID", ofProcess: pid) == pane { return true }
+        }
+        return false
+    }
+
     static func pid(fromAddress address: String) -> Int32? {
         guard address.hasPrefix("uds:") else { return nil }
         let file = (String(address.dropFirst(4)) as NSString).lastPathComponent

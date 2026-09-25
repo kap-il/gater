@@ -444,12 +444,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let socketPath = ProcessInfo.processInfo.environment["GATER_COLLECTOR"] ?? EventBus.defaultSocketPath()
         // The bus appends hook events to the log itself; the callback only
         // feeds the live view.
-        let bus = EventBus(socketPath: socketPath, eventLog: eventLog) { [weak self] event in
+        let bus = EventBus(socketPath: socketPath, eventLog: eventLog, onEvent: { [weak self] event in
             self?.planStore?.apply(event)
             self?.analyzeSymbols(for: event)
             self?.symbolQueue.async { self?.detectOverlaps(event) }
             DispatchQueue.main.async { self?.windowController?.eventFeed.append(event) }
-        }
+        }, onRequest: { [weak self] request in
+            self?.handle(request: request) ?? .object(["ok": .bool(false), "reason": .string("Gater is shutting down")])
+        })
         do {
             try FileManager.default.createDirectory(atPath: (socketPath as NSString).deletingLastPathComponent,
                                                     withIntermediateDirectories: true)
@@ -460,6 +462,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 "text": .string("couldn't listen on \(socketPath): \(error)"),
             ]))
         }
+    }
+
+    // MARK: - Auto-spawned delegates
+
+    static let autoTrustKey = "GaterAutoTrustWorktrees"
+
+    /// Off by default: Gater only marks its own worktrees trusted in
+    /// ~/.claude.json when the user turned this on.
+    private var autoTrustWorktrees: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.autoTrustKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.autoTrustKey) }
+    }
+
+    /// Requests from gater-hook, on the requesting client's thread.
+    private func handle(request: JSONValue) -> JSONValue {
+        func fail(_ reason: String) -> JSONValue { .object(["ok": .bool(false), "reason": .string(reason)]) }
+        guard request.value(atPath: "request")?.stringValue == "ensure_delegate",
+              let pane = request.value(atPath: "pane")?.stringValue, pane.hasPrefix("delegate-") else {
+            return fail("unknown request")
+        }
+        let name = String(pane.dropFirst("delegate-".count))
+
+        // Open the pane on the main thread (creating worktree + trust first).
+        var spawnError: String?
+        var worktree: String?
+        DispatchQueue.main.sync {
+            if let existing = paneManager.pane(id: pane) {
+                worktree = existing.worktree
+                return
+            }
+            do {
+                let path = try GitWorktree.ensure(delegate: name, repoRoot: paneManager.repoRoot)
+                worktree = path
+                if autoTrustWorktrees {
+                    // Must happen before claude starts, or it shows the prompt.
+                    try? ClaudeTrust.trustWorktree(path, createdFrom: paneManager.repoRoot)
+                }
+                try paneManager.spawnDelegate(name: name, spawnedBy: "orch")
+            } catch {
+                spawnError = "\(error)"
+            }
+        }
+        if let spawnError { return fail(spawnError) }
+
+        // Wait until the new session can receive the message.
+        let deadline = Date().addingTimeInterval(60)
+        while Date() < deadline {
+            if PaneAddressResolver.isSessionReady(pane: pane) { return .object(["ok": .bool(true)]) }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        if let worktree, !ClaudeTrust.isTrusted(worktree) {
+            return fail("\(pane) is open but waiting at Claude's \"trust this folder\" prompt. Ask the user to accept it in the \(pane) box, then resend. (Auto-trust for Gater's worktrees can be turned on in the Gater menu.)")
+        }
+        return fail("\(pane) opened but its Claude session didn't come up within 60s.")
+    }
+
+    @objc private func toggleAutoTrust(_ sender: NSMenuItem) {
+        autoTrustWorktrees.toggle()
+        sender.state = autoTrustWorktrees ? .on : .off
     }
 
     // MARK: - Repo selection
@@ -555,6 +616,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
+        let autoTrust = NSMenuItem(title: "Auto-trust Delegate Worktrees", action: #selector(toggleAutoTrust(_:)), keyEquivalent: "")
+        autoTrust.target = self
+        autoTrust.state = UserDefaults.standard.bool(forKey: Self.autoTrustKey) ? .on : .off
+        autoTrust.toolTip = "When the orchestrator opens a delegate, mark Gater's new worktree trusted in Claude Code (only if you already trust this repo), so it starts without the trust prompt."
+        appMenu.addItem(autoTrust)
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Gater", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Gater", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")

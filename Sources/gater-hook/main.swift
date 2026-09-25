@@ -43,6 +43,20 @@ let outcome = HookProcessor.process(
 )
 
 let collector = environment["GATER_COLLECTOR"] ?? EventBus.defaultSocketPath()
+
+// Delegating to a pane that may not exist: ask Gater to open it and wait
+// until its session can receive the message. Gater unreachable → fail open.
+if outcome.exitCode == 0, let pane = outcome.ensurePane {
+    let request = JSONValue.object(["request": .string("ensure_delegate"), "pane": .string(pane)])
+    if let line = try? JSONEncoder().encode(request),
+       let replyText = try? UnixSocketClient(path: collector).request(line: String(decoding: line, as: UTF8.self), timeout: 90),
+       let reply = try? JSONDecoder().decode(JSONValue.self, from: Data(replyText.utf8)),
+       reply.value(atPath: "ok") != .bool(true) {
+        let reason = reply.value(atPath: "reason")?.stringValue ?? "unknown error"
+        FileHandle.standardError.write("Gater: couldn't open \(pane) — \(reason)\n".data(using: .utf8)!)
+        exit(2)
+    }
+}
 for event in outcome.events {
     if let line = try? JSONEncoder().encode(event), let text = String(data: line, encoding: .utf8) {
         try? UnixSocketClient(path: collector).send(line: text) // best effort

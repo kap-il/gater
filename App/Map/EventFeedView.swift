@@ -79,6 +79,8 @@ final class EventFeedView: NSView {
             detail = event["path"]?.stringValue.map { ($0 as NSString).lastPathComponent } ?? ""
         case "command":
             detail = event["command"]?.stringValue ?? ""
+        case "pane_opened":
+            detail = event["spawned_by"]?.stringValue.map { "opened by \($0)" } ?? ""
         case "symbols_changed":
             let changes = (event.fields["changes"]?.arrayValue ?? []).compactMap { change -> String? in
                 guard let symbol = change.value(atPath: "symbol")?.stringValue,

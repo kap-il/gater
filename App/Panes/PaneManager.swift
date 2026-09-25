@@ -57,11 +57,12 @@ final class PaneManager {
     /// "New delegate": creates `../<repo>-<name>` on `gater/<name>` and
     /// launches the agent in it.
     @discardableResult
-    func spawnDelegate(name: String) throws -> Pane {
+    func spawnDelegate(name: String, spawnedBy: String? = nil) throws -> Pane {
         let id = "delegate-\(name)"
         if let existing = pane(id: id) { return existing }
         let worktree = try GitWorktree.ensure(delegate: name, repoRoot: repoRoot)
-        return try spawn(id: id, role: .delegate, name: name, worktree: worktree, command: agentCommand(named: id))
+        return try spawn(id: id, role: .delegate, name: name, worktree: worktree, command: agentCommand(named: id),
+                         spawnedBy: spawnedBy)
     }
 
     @discardableResult
@@ -71,7 +72,8 @@ final class PaneManager {
                          worktree: directory ?? repoRoot, command: nil)
     }
 
-    private func spawn(id: String, role: PaneRole, name: String, worktree: String, command: String?) throws -> Pane {
+    private func spawn(id: String, role: PaneRole, name: String, worktree: String, command: String?,
+                       spawnedBy: String? = nil) throws -> Pane {
         var env: [String: String] = [
             "GATER_PANE_ID": id,
             "GATER_ROLE": role.rawValue,
@@ -103,9 +105,11 @@ final class PaneManager {
         }
 
         panes.append(pane)
-        log(GaterEvent(kind: "pane_opened", extra: [
+        var opened: [String: JSONValue] = [
             "pane": .string(id), "role": .string(role.rawValue), "worktree": .string(worktree),
-        ]))
+        ]
+        if let spawnedBy { opened["spawned_by"] = .string(spawnedBy) }
+        log(GaterEvent(kind: "pane_opened", extra: opened))
         onPaneAdded?(pane)
         return pane
     }
