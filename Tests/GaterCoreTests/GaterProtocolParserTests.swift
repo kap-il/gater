@@ -179,4 +179,25 @@ final class GaterProtocolParserTests: XCTestCase {
         let note = try XCTUnwrap(GaterProtocol.extractDoneNote(from: text))
         XCTAssertEqual(note.touched, [])
     }
+
+    /// Seen live: a summary line with the same prefix precedes the block.
+    func testDoneNoteAfterSummaryLine() throws {
+        let text = """
+        GATER-DONE d-002: UserCard added and committed (44bb1d7 on gater/dash).
+
+        GATER-DONE d-002
+        did: Added src/dashboard/UserCard.tsx
+        assumed: getUser is synchronous
+        touched: src/dashboard/UserCard.tsx
+        """
+        let note = try XCTUnwrap(GaterProtocol.extractDoneNote(from: text))
+        XCTAssertEqual(note.dishId, "d-002")
+        XCTAssertEqual(note.did, "Added src/dashboard/UserCard.tsx")
+        XCTAssertEqual(note.touched, ["src/dashboard/UserCard.tsx"])
+    }
+
+    func testDoneNoteHeaderWithTrailingColon() throws {
+        let note = try XCTUnwrap(GaterProtocol.extractDoneNote(from: "GATER-DONE d-007:\ndid: x\nassumed: y"))
+        XCTAssertEqual(note.dishId, "d-007")
+    }
 }

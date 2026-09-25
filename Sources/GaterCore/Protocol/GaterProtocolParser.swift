@@ -122,37 +122,39 @@ public enum GaterProtocol {
     /// Scans free text for a `GATER-DONE <id>` block. Returns `nil` (not an
     /// error) when the text doesn't contain one, since not every `Stop`
     /// event ends a unit of work.
+    /// Finds a GATER-DONE block in free text. Delegates often lead with a
+    /// summary line like `GATER-DONE d-002: UserCard added` before the real
+    /// block (seen live), so every `GATER-DONE <id>` line is tried and the
+    /// first one followed by `did:` / `assumed:` fields wins.
     public static func extractDoneNote(from text: String) -> GaterDoneNote? {
         let lines = text.components(separatedBy: "\n")
-        guard let headerIndex = lines.firstIndex(where: {
-            $0.trimmingCharacters(in: .whitespaces).hasPrefix("GATER-DONE ")
-        }) else {
-            return nil
-        }
-        let headerLine = lines[headerIndex].trimmingCharacters(in: .whitespaces)
-        let dishId = headerLine
-            .dropFirst("GATER-DONE ".count)
-            .trimmingCharacters(in: .whitespaces)
-        guard !dishId.isEmpty else { return nil }
+        for (headerIndex, rawHeader) in lines.enumerated() {
+            let headerLine = rawHeader.trimmingCharacters(in: .whitespaces)
+            guard headerLine.hasPrefix("GATER-DONE ") else { continue }
+            // The id is the first token, minus trailing punctuation.
+            let dishId = headerLine.dropFirst("GATER-DONE ".count)
+                .split(separator: " ").first.map(String.init)?
+                .trimmingCharacters(in: CharacterSet(charactersIn: ":.,;"))
+                ?? ""
+            guard !dishId.isEmpty else { continue }
 
-        var fields: [String: String] = [:]
-        for line in lines[(headerIndex + 1)...] {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty { break }
-            guard let colonIndex = line.firstIndex(of: ":") else { break }
-            let key = line[line.startIndex..<colonIndex].trimmingCharacters(in: .whitespaces)
-            let value = line[line.index(after: colonIndex)...].trimmingCharacters(in: .whitespaces)
-            fields[key] = value
-        }
+            var fields: [String: String] = [:]
+            for line in lines[(headerIndex + 1)...] {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty { break }
+                guard let colonIndex = line.firstIndex(of: ":") else { break }
+                let key = line[line.startIndex..<colonIndex].trimmingCharacters(in: .whitespaces)
+                let value = line[line.index(after: colonIndex)...].trimmingCharacters(in: .whitespaces)
+                fields[key] = value
+            }
 
-        guard let did = fields["did"], let assumed = fields["assumed"] else {
-            return nil
+            guard let did = fields["did"], let assumed = fields["assumed"] else { continue }
+            let touched = (fields["touched"] ?? "")
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            return GaterDoneNote(dishId: dishId, did: did, assumed: assumed, touched: touched)
         }
-        let touched = (fields["touched"] ?? "")
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-
-        return GaterDoneNote(dishId: dishId, did: did, assumed: assumed, touched: touched)
+        return nil
     }
 }

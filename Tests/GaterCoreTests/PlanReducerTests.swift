@@ -141,4 +141,16 @@ final class PlanReducerTests: XCTestCase {
         XCTAssertEqual(PlanStore.load(from: store.path)?.dish("d-001")?.state, .pass)
         XCTAssertEqual(PlanStore.load(from: dir.appendingPathComponent("missing.json")), Plan())
     }
+
+    /// Replaying a log whose done_note was missed still reaches `pass`.
+    func testDoneNoteInLoggedMessageHealsOnReplay() {
+        let plan = PlanReducer.replay([
+            delegation("delegate", "d-002", feature: "Dashboard", directive: "card", to: "delegate-dash"),
+            GaterEvent(fields: ["kind": .string("message"), "pane": .string("delegate-dash"), "ts": .string(ts()),
+                                "raw": .string("GATER-DONE d-002: done.\n\nGATER-DONE d-002\ndid: x\nassumed: y")]),
+            done("d-002"), // the hook's own done_note for the same report: no double move
+        ])
+        XCTAssertEqual(plan.dish("d-002")?.state, .pass)
+        XCTAssertEqual(plan.changes.filter { $0.type == "done" }.count, 1)
+    }
 }

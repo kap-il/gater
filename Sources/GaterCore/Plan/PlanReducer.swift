@@ -21,6 +21,18 @@ public enum PlanReducer {
             return applyDelegation(type: type, id: id, gater: gater, to: event["to"]?.stringValue,
                                    ts: ts, plan: &plan)
 
+        case "message":
+            // A delegate's report carries its GATER-DONE note in the raw
+            // text. Reading it here too means the plan heals on replay even
+            // for notes an older parser missed. (Seen twice = harmless: only
+            // cooking → pass moves.)
+            guard let raw = event["raw"]?.stringValue,
+                  let note = GaterProtocol.extractDoneNote(from: raw) else { return false }
+            return apply(GaterEvent(fields: [
+                "kind": .string("done_note"), "ts": .string(ts), "dish": .string(note.dishId),
+                "did": .string(note.did), "assumed": .string(note.assumed),
+            ]), to: &plan)
+
         case "done_note":
             guard let id = event["dish"]?.stringValue else { return false }
             guard let index = plan.dishes.firstIndex(where: { $0.id == id }) else {
