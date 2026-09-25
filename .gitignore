@@ -9,3 +9,4 @@ xcuserdata/
 !.gater/snapshots/.gitkeep
 .DS_Store
 Vendor/ghostty/build/
+Vendor/ghostty/GhosttyVT.xcframework/
