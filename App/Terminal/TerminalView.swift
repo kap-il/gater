@@ -76,7 +76,7 @@ final class TerminalView: NSView {
         for (y, row) in snap.cells.enumerated() {
             let top = padding + CGFloat(y) * cellH
             drawBackgrounds(row: row, top: top, snap: snap, ctx: ctx)
-            drawText(row: row, top: top, snap: snap)
+            drawText(row: row, top: top, snap: snap, ctx: ctx)
         }
 
         if let cursor = snap.cursor {
@@ -115,64 +115,57 @@ final class TerminalView: NSView {
         }
     }
 
-    /// Consecutive ASCII cells with identical attributes are drawn as one
-    /// string (a monospace font keeps them on the grid). Anything else —
-    /// wide chars, emoji, combining marks — is drawn alone at its own cell
-    /// so a font-fallback advance can't push the rest of the row off-grid.
-    private func drawText(row: [Cell], top: CGFloat, snap: ScreenSnapshot) {
+    /// ASCII cells are drawn as glyphs placed explicitly at
+    /// `column × cellWidth`. Drawing them as strings let the font's natural
+    /// advance (e.g. 7.8pt) drift away from the rounded cell grid (8pt),
+    /// leaving the cursor a space or more "ahead" of the text on long lines.
+    /// Anything else — wide chars, emoji, combining marks — goes through
+    /// text layout (for font fallback), one cell at a time, so it can't push
+    /// the rest of the row off-grid either.
+    private func drawText(row: [Cell], top: CGFloat, snap: ScreenSnapshot, ctx: CGContext) {
         let cellW = font.cellSize.width
-        var runStart = 0
-        var runText = ""
-        var runAttrs: [NSAttributedString.Key: Any]?
-
-        func flush() {
-            if let attrs = runAttrs, !runText.allSatisfy({ $0 == " " }) {
-                NSAttributedString(string: runText, attributes: attrs)
-                    .draw(at: NSPoint(x: padding + CGFloat(runStart) * cellW, y: top))
-            }
-            runText = ""
-            runAttrs = nil
-        }
+        let baseline = top + font.baselineOffset
 
         for (x, cell) in row.enumerated() {
-            let attrs = attributes(for: cell, snap: snap)
-            let isSimple = cell.text.isEmpty || (cell.text.unicodeScalars.count == 1 && cell.text.unicodeScalars.first!.isASCII)
+            guard !cell.text.isEmpty, !cell.style.contains(.invisible) else { continue }
+            let (fg, _) = resolvedColors(cell, snap: snap)
+            let alpha: CGFloat = cell.style.contains(.faint) ? 0.6 : 1
+            let color = fg.nsColor.withAlphaComponent(alpha)
+            let nsFont = font.font(for: CellStyleFlags(bold: cell.style.contains(.bold),
+                                                       italic: cell.style.contains(.italic)))
+            let originX = padding + CGFloat(x) * cellW
+            let scalars = cell.text.unicodeScalars
 
-            if !isSimple {
-                flush()
-                if !cell.style.contains(.invisible) {
-                    NSAttributedString(string: cell.text, attributes: attrs)
-                        .draw(at: NSPoint(x: padding + CGFloat(x) * cellW, y: top))
+            if scalars.count == 1, let scalar = scalars.first, scalar.isASCII, scalar != " " {
+                var ch = UniChar(scalar.value)
+                var glyph = CGGlyph()
+                if CTFontGetGlyphsForCharacters(nsFont as CTFont, &ch, &glyph, 1) {
+                    ctx.saveGState()
+                    // The view is flipped: move to the glyph's baseline and
+                    // flip there, so the glyph draws upright at (0, 0).
+                    ctx.translateBy(x: originX, y: baseline)
+                    ctx.scaleBy(x: 1, y: -1)
+                    ctx.textMatrix = .identity
+                    ctx.setFillColor(color.cgColor)
+                    var position = CGPoint.zero
+                    CTFontDrawGlyphs(nsFont as CTFont, &glyph, &position, 1, ctx)
+                    ctx.restoreGState()
                 }
-                runStart = x + 1
-                continue
+            } else if !(scalars.count == 1 && scalars.first == " ") {
+                NSAttributedString(string: cell.text, attributes: [.font: nsFont, .foregroundColor: color])
+                    .draw(at: NSPoint(x: originX, y: top))
             }
 
-            let text = (cell.text.isEmpty || cell.style.contains(.invisible)) ? " " : cell.text
-            if let current = runAttrs, !NSDictionary(dictionary: current).isEqual(to: attrs) {
-                flush()
+            if cell.style.contains(.underline) || cell.style.contains(.strikethrough) {
+                ctx.setFillColor(color.cgColor)
+                if cell.style.contains(.underline) {
+                    ctx.fill(CGRect(x: originX, y: baseline + 1.5, width: cellW, height: 1))
+                }
+                if cell.style.contains(.strikethrough) {
+                    ctx.fill(CGRect(x: originX, y: baseline - font.cellSize.height * 0.3, width: cellW, height: 1))
+                }
             }
-            if runAttrs == nil {
-                runStart = x
-                runAttrs = attrs
-            }
-            runText += text
         }
-        flush()
-    }
-
-    private func attributes(for cell: Cell, snap: ScreenSnapshot) -> [NSAttributedString.Key: Any] {
-        let (fg, _) = resolvedColors(cell, snap: snap)
-        var color = fg.nsColor
-        if cell.style.contains(.faint) { color = color.withAlphaComponent(0.6) }
-        var attrs: [NSAttributedString.Key: Any] = [
-            .font: font.font(for: CellStyleFlags(bold: cell.style.contains(.bold),
-                                                 italic: cell.style.contains(.italic))),
-            .foregroundColor: color,
-        ]
-        if cell.style.contains(.underline) { attrs[.underlineStyle] = NSUnderlineStyle.single.rawValue }
-        if cell.style.contains(.strikethrough) { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
-        return attrs
     }
 
     private func drawCursor(_ cursor: CursorState, snap: ScreenSnapshot, ctx: CGContext) {
@@ -236,8 +229,61 @@ final class TerminalView: NSView {
         return true
     }
 
+    // MARK: - Mouse
+    //
+    // Everything is offered to libghostty's mouse encoder, which returns
+    // nothing unless the running program enabled mouse reporting.
+
+    private var pressedButtons = 0
+
+    private var mouseGeometry: MouseGeometry {
+        MouseGeometry(screenWidth: UInt32(max(bounds.width, 0)), screenHeight: UInt32(max(bounds.height, 0)),
+                      cellWidth: UInt32(font.cellSize.width), cellHeight: UInt32(font.cellSize.height),
+                      padding: UInt32(padding))
+    }
+
+    private func mods(_ event: NSEvent) -> KeyMods {
+        var mods: KeyMods = []
+        if event.modifierFlags.contains(.shift) { mods.insert(.shift) }
+        if event.modifierFlags.contains(.control) { mods.insert(.control) }
+        if event.modifierFlags.contains(.option) { mods.insert(.option) }
+        if event.modifierFlags.contains(.command) { mods.insert(.command) }
+        return mods
+    }
+
+    private func report(_ action: MouseAction, _ button: MouseButton?, _ event: NSEvent) {
+        guard session.isRunning else { return }
+        if action == .press { pressedButtons += 1 }
+        if action == .release { pressedButtons = max(pressedButtons - 1, 0) }
+        let point = convert(event.locationInWindow, from: nil) // flipped: y from top
+        let bytes = session.core.encode(mouse: action, button: button, at: point, mods: mods(event),
+                                        anyButtonPressed: pressedButtons > 0, geometry: mouseGeometry)
+        session.send(bytes)
+    }
+
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        report(.press, .left, event)
+    }
+    override func mouseUp(with event: NSEvent) { report(.release, .left, event) }
+    override func mouseDragged(with event: NSEvent) { report(.motion, .left, event) }
+    override func rightMouseDown(with event: NSEvent) { report(.press, .right, event) }
+    override func rightMouseUp(with event: NSEvent) { report(.release, .right, event) }
+    override func rightMouseDragged(with event: NSEvent) { report(.motion, .right, event) }
+    override func otherMouseDown(with event: NSEvent) {
+        if event.buttonNumber == 2 { report(.press, .middle, event) }
+    }
+    override func otherMouseUp(with event: NSEvent) {
+        if event.buttonNumber == 2 { report(.release, .middle, event) }
+    }
+    override func mouseMoved(with event: NSEvent) { report(.motion, nil, event) }
+
+    /// Hover motion (for any-event tracking, mode 1003) needs a tracking area.
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+                                       owner: self, userInfo: nil))
     }
 
     // MARK: - Keyboard
@@ -321,16 +367,21 @@ final class TerminalView: NSView {
     // MARK: - Scrollback
 
     override func scrollWheel(with event: NSEvent) {
-        // Mouse-tracking programs would want wheel reports; that encoder
-        // isn't wired up yet, so the wheel always scrolls history for now.
         let lineHeight = font.cellSize.height
         let delta = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * lineHeight * 3
         scrollAccumulator += delta
         let lines = Int(scrollAccumulator / lineHeight)
         guard lines != 0 else { return }
         scrollAccumulator -= CGFloat(lines) * lineHeight
-        session.core.scrollViewport(delta: -lines)
-        needsDisplay = true
+
+        // Wheel up (positive delta) means "show earlier content": -lines.
+        let point = convert(event.locationInWindow, from: nil)
+        let bytes = session.core.wheel(lines: -lines, at: point, mods: mods(event), geometry: mouseGeometry)
+        if bytes.isEmpty {
+            needsDisplay = true // scrolled our own scrollback
+        } else if session.isRunning {
+            session.send(bytes)
+        }
     }
 }
 

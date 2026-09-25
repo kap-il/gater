@@ -136,4 +136,46 @@ final class TerminalCoreTests: XCTestCase {
         core.scrollToBottom()
         XCTAssertEqual(core.snapshot().text(row: 2), "line10")
     }
+
+    // MARK: - Mouse and wheel
+
+    private let geometry = MouseGeometry(screenWidth: 800, screenHeight: 480, cellWidth: 8,
+                                         cellHeight: 16, padding: 0)
+
+    func testWheelScrollsScrollbackOnPrimaryScreen() throws {
+        let core = try TerminalCore(cols: 10, rows: 3)
+        core.feed((1...10).map { "line\($0)" }.joined(separator: "\r\n"))
+        XCTAssertEqual(core.wheel(lines: -2, at: .zero, mods: [], geometry: geometry), [])
+        XCTAssertEqual(core.snapshot().text(row: 2), "line8")
+    }
+
+    func testWheelSendsArrowsOnAlternateScreen() throws {
+        let core = try TerminalCore(cols: 10, rows: 3)
+        core.feed("\u{1b}[?1049h") // vim/less/top enter the alt screen but never set 1007
+        XCTAssertEqual(String(decoding: core.wheel(lines: -2, at: .zero, mods: [], geometry: geometry), as: UTF8.self),
+                       "\u{1b}[A\u{1b}[A")
+        core.feed("\u{1b}[?1h")
+        XCTAssertEqual(String(decoding: core.wheel(lines: 1, at: .zero, mods: [], geometry: geometry), as: UTF8.self),
+                       "\u{1b}OB")
+    }
+
+    func testWheelAndClicksReportedWhenProgramTracksMouse() throws {
+        let core = try TerminalCore(cols: 100, rows: 30)
+        core.feed("\u{1b}[?1000h\u{1b}[?1006h") // normal tracking, SGR format
+        let point = CGPoint(x: 8 * 4 + 1, y: 16 * 2 + 1) // cell (col 5, row 3), 1-based
+        XCTAssertEqual(String(decoding: core.wheel(lines: -1, at: point, mods: [], geometry: geometry), as: UTF8.self),
+                       "\u{1b}[<64;5;3M")
+        XCTAssertEqual(String(decoding: core.encode(mouse: .press, button: .left, at: point, mods: [],
+                                                    anyButtonPressed: true, geometry: geometry), as: UTF8.self),
+                       "\u{1b}[<0;5;3M")
+        XCTAssertEqual(String(decoding: core.encode(mouse: .release, button: .left, at: point, mods: [],
+                                                    anyButtonPressed: false, geometry: geometry), as: UTF8.self),
+                       "\u{1b}[<0;5;3m")
+    }
+
+    func testNoMouseReportsWithoutTracking() throws {
+        let core = try TerminalCore(cols: 10, rows: 3)
+        XCTAssertEqual(core.encode(mouse: .press, button: .left, at: .zero, mods: [],
+                                   anyButtonPressed: true, geometry: geometry), [])
+    }
 }

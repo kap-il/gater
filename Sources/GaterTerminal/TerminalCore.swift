@@ -27,6 +27,8 @@ public final class TerminalCore {
     private var rowCells: GhosttyRenderStateRowCells?
     private var keyEncoder: GhosttyKeyEncoder?
     private var keyEvent: GhosttyKeyEvent?
+    private var mouseEncoder: GhosttyMouseEncoder?
+    private var mouseEvent: GhosttyMouseEvent?
 
     public private(set) var cols: UInt16
     public private(set) var rows: UInt16
@@ -55,6 +57,10 @@ public final class TerminalCore {
         try check("ghostty_render_state_row_cells_new", ghostty_render_state_row_cells_new(nil, &rowCells))
         try check("ghostty_key_encoder_new", ghostty_key_encoder_new(nil, &keyEncoder))
         try check("ghostty_key_event_new", ghostty_key_event_new(nil, &keyEvent))
+        try check("ghostty_mouse_encoder_new", ghostty_mouse_encoder_new(nil, &mouseEncoder))
+        try check("ghostty_mouse_event_new", ghostty_mouse_event_new(nil, &mouseEvent))
+        var trackLastCell = true // suppress repeat motion reports within one cell
+        ghostty_mouse_encoder_setopt(mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL, &trackLastCell)
 
         var scrollback = scrollbackLines
         ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES, &scrollback)
@@ -62,6 +68,8 @@ public final class TerminalCore {
     }
 
     deinit {
+        if let mouseEvent { ghostty_mouse_event_free(mouseEvent) }
+        if let mouseEncoder { ghostty_mouse_encoder_free(mouseEncoder) }
         if let keyEvent { ghostty_key_event_free(keyEvent) }
         if let keyEncoder { ghostty_key_encoder_free(keyEncoder) }
         if let rowCells { ghostty_render_state_row_cells_free(rowCells) }
@@ -218,6 +226,94 @@ public final class TerminalCore {
         let result = ghostty_focus_encode(gained ? GHOSTTY_FOCUS_GAINED : GHOSTTY_FOCUS_LOST,
                                           &out, out.count, &written)
         guard result == GHOSTTY_SUCCESS else { return [] }
+        return out.prefix(written).map { UInt8(bitPattern: $0) }
+    }
+
+    // MARK: - Mouse
+
+    /// Encodes a click/drag/move for programs that enabled mouse reporting
+    /// (the encoder picks X10/SGR/... from the terminal's modes). Returns []
+    /// when the program didn't ask for this kind of event.
+    public func encode(mouse action: MouseAction, button: MouseButton?, at point: CGPoint,
+                       mods: KeyMods, anyButtonPressed: Bool, geometry: MouseGeometry) -> [UInt8] {
+        lock.lock(); defer { lock.unlock() }
+        let ghosttyAction: GhosttyMouseAction
+        switch action {
+        case .press: ghosttyAction = GHOSTTY_MOUSE_ACTION_PRESS
+        case .release: ghosttyAction = GHOSTTY_MOUSE_ACTION_RELEASE
+        case .motion: ghosttyAction = GHOSTTY_MOUSE_ACTION_MOTION
+        }
+        return encodeMouseLocked(action: ghosttyAction, button: button.map(\.ghostty), at: point,
+                                 mods: mods, anyButtonPressed: anyButtonPressed, geometry: geometry)
+    }
+
+    /// Handles `lines` of wheel movement (negative = up, into history) the
+    /// way terminals conventionally do:
+    /// - program enabled mouse reporting → wheel button presses (4/5);
+    /// - full-screen program on the alternate screen with alternate-scroll
+    ///   mode (1007) → arrow keys, so vim/less/top scroll their content;
+    /// - otherwise → scroll our own scrollback, returning [].
+    public func wheel(lines: Int, at point: CGPoint, mods: KeyMods, geometry: MouseGeometry) -> [UInt8] {
+        guard lines != 0 else { return [] }
+        lock.lock(); defer { lock.unlock() }
+
+        var tracking = false
+        ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &tracking)
+        if tracking {
+            let button = lines < 0 ? GHOSTTY_MOUSE_BUTTON_FOUR : GHOSTTY_MOUSE_BUTTON_FIVE
+            var out: [UInt8] = []
+            for _ in 0..<abs(lines) {
+                out += encodeMouseLocked(action: GHOSTTY_MOUSE_ACTION_PRESS, button: button, at: point,
+                                         mods: mods, anyButtonPressed: false, geometry: geometry)
+            }
+            return out
+        }
+
+        var screen = GHOSTTY_TERMINAL_SCREEN_PRIMARY
+        ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN, &screen)
+        if screen == GHOSTTY_TERMINAL_SCREEN_ALTERNATE && modeEnabled(1007) {
+            let applicationCursor = modeEnabled(1) // DECCKM
+            let arrow = lines < 0 ? "A" : "B"
+            let sequence = (applicationCursor ? "\u{1b}O" : "\u{1b}[") + arrow
+            return Array(String(repeating: sequence, count: abs(lines)).utf8)
+        }
+
+        var scroll = GhosttyTerminalScrollViewport()
+        scroll.tag = GHOSTTY_SCROLL_VIEWPORT_DELTA
+        scroll.value.delta = lines
+        ghostty_terminal_scroll_viewport(terminal, scroll)
+        return []
+    }
+
+    private func encodeMouseLocked(action: GhosttyMouseAction, button: GhosttyMouseButton?, at point: CGPoint,
+                                   mods: KeyMods, anyButtonPressed: Bool, geometry: MouseGeometry) -> [UInt8] {
+        guard let mouseEncoder, let mouseEvent else { return [] }
+        ghostty_mouse_encoder_setopt_from_terminal(mouseEncoder, terminal)
+
+        var size = GhosttyMouseEncoderSize()
+        size.size = MemoryLayout<GhosttyMouseEncoderSize>.size
+        size.screen_width = geometry.screenWidth
+        size.screen_height = geometry.screenHeight
+        size.cell_width = geometry.cellWidth
+        size.cell_height = geometry.cellHeight
+        size.padding_top = geometry.padding
+        size.padding_bottom = geometry.padding
+        size.padding_left = geometry.padding
+        size.padding_right = geometry.padding
+        ghostty_mouse_encoder_setopt(mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, &size)
+        var pressed = anyButtonPressed
+        ghostty_mouse_encoder_setopt(mouseEncoder, GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED, &pressed)
+
+        ghostty_mouse_event_set_action(mouseEvent, action)
+        if let button { ghostty_mouse_event_set_button(mouseEvent, button) } else { ghostty_mouse_event_clear_button(mouseEvent) }
+        ghostty_mouse_event_set_mods(mouseEvent, mods.rawValue)
+        ghostty_mouse_event_set_position(mouseEvent, GhosttyMousePosition(x: Float(point.x), y: Float(point.y)))
+
+        var out = [CChar](repeating: 0, count: 64)
+        var written = 0
+        guard ghostty_mouse_encoder_encode(mouseEncoder, mouseEvent, &out, out.count, &written) == GHOSTTY_SUCCESS else {
+            return []
+        }
         return out.prefix(written).map { UInt8(bitPattern: $0) }
     }
 
@@ -456,5 +552,39 @@ extension CellStyle {
         if s.strikethrough { style.insert(.strikethrough) }
         if s.underline != 0 { style.insert(.underline) }
         self = style
+    }
+}
+
+public enum MouseAction: Sendable {
+    case press, release, motion
+}
+
+public enum MouseButton: Sendable {
+    case left, right, middle
+
+    var ghostty: GhosttyMouseButton {
+        switch self {
+        case .left: return GHOSTTY_MOUSE_BUTTON_LEFT
+        case .right: return GHOSTTY_MOUSE_BUTTON_RIGHT
+        case .middle: return GHOSTTY_MOUSE_BUTTON_MIDDLE
+        }
+    }
+}
+
+/// View geometry the mouse encoder needs to turn points into cells. All
+/// values share one unit (points, in Gater), with y measured from the top.
+public struct MouseGeometry: Sendable {
+    public var screenWidth: UInt32
+    public var screenHeight: UInt32
+    public var cellWidth: UInt32
+    public var cellHeight: UInt32
+    public var padding: UInt32
+
+    public init(screenWidth: UInt32, screenHeight: UInt32, cellWidth: UInt32, cellHeight: UInt32, padding: UInt32) {
+        self.screenWidth = screenWidth
+        self.screenHeight = screenHeight
+        self.cellWidth = cellWidth
+        self.cellHeight = cellHeight
+        self.padding = padding
     }
 }
