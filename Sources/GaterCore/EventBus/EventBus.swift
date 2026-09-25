@@ -11,11 +11,23 @@ public final class EventBus {
     private let onEvent: EventHandler?
     private let decoder = JSONDecoder()
 
-    public init(socketPath: String, eventLog: EventLog? = nil, onEvent: EventHandler? = nil) {
+    /// Answers a request from gater-hook (JSON in, JSON out). Runs on the
+    /// requesting client's thread and may block.
+    public typealias RequestHandler = (JSONValue) -> JSONValue
+
+    public init(socketPath: String, eventLog: EventLog? = nil, onEvent: EventHandler? = nil,
+                onRequest: RequestHandler? = nil) {
         self.eventLog = eventLog
         self.onEvent = onEvent
         var handler: ((String) -> Void)!
-        self.server = UnixSocketServer(path: socketPath, onLine: { line in handler(line) })
+        self.server = UnixSocketServer(path: socketPath, onLine: { line in handler(line) }, onRequest: { line in
+            guard let onRequest,
+                  let request = try? JSONDecoder().decode(JSONValue.self, from: Data(line.utf8)),
+                  let reply = try? JSONEncoder().encode(onRequest(request)) else {
+                return #"{"ok":false,"reason":"bad request"}"#
+            }
+            return String(decoding: reply, as: UTF8.self)
+        })
         handler = { [weak self] line in self?.handle(line: line) }
     }
 

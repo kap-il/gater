@@ -71,4 +71,21 @@ final class EventBusTests: XCTestCase {
         XCTAssertEqual(replayed.count, 1)
         XCTAssertEqual(replayed[0].kind, "edit")
     }
+
+    func testRequestGetsAReplyWhileEventsStillFlow() throws {
+        let path = NSTemporaryDirectory() + "gater-req-\(UUID().uuidString.prefix(8)).sock"
+        let received = expectation(description: "event")
+        let bus = EventBus(socketPath: path, onEvent: { _ in received.fulfill() }, onRequest: { request in
+            .object(["ok": .bool(true), "echo": request.value(atPath: "pane") ?? .null])
+        })
+        try bus.start()
+        defer { bus.stop() }
+
+        let reply = try UnixSocketClient(path: path).request(line: #"{"request":"ensure_delegate","pane":"delegate-x"}"#, timeout: 5)
+        let json = try JSONDecoder().decode(JSONValue.self, from: Data(reply.utf8))
+        XCTAssertEqual(json.value(atPath: "echo")?.stringValue, "delegate-x")
+
+        try UnixSocketClient(path: path).send(line: #"{"kind":"edit","ts":"t"}"#)
+        wait(for: [received], timeout: 2)
+    }
 }

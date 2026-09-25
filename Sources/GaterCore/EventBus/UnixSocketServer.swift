@@ -13,20 +13,25 @@ public enum UnixSocketServerError: Error, Equatable {
 
 /// Long-lived Unix domain socket server backing the Gater event bus.
 /// One accept loop thread, one reader thread per connected `gater-hook`
-/// client (each of which sends exactly one line and disconnects).
+/// client. Plain lines are events (fire and forget). A line starting with
+/// `?` is a request: it's answered with one reply line on the same
+/// connection (the handler may block; each client has its own thread).
 public final class UnixSocketServer {
     public typealias LineHandler = (String) -> Void
+    public typealias RequestHandler = (String) -> String
 
     private let path: String
     private let onLine: LineHandler
+    private let onRequest: RequestHandler?
     private var listenFD: Int32 = -1
     private var acceptThread: Thread?
     private let stateLock = NSLock()
     private var isRunning = false
 
-    public init(path: String, onLine: @escaping LineHandler) {
+    public init(path: String, onLine: @escaping LineHandler, onRequest: RequestHandler? = nil) {
         self.path = path
         self.onLine = onLine
+        self.onRequest = onRequest
     }
 
     public func start() throws {
@@ -89,7 +94,11 @@ public final class UnixSocketServer {
             while let newlineIndex = buffer.firstIndex(of: 0x0A) {
                 let lineBytes = Array(buffer[0..<newlineIndex])
                 buffer.removeFirst(newlineIndex + 1)
-                if let line = String(bytes: lineBytes, encoding: .utf8), !line.isEmpty {
+                guard let line = String(bytes: lineBytes, encoding: .utf8), !line.isEmpty else { continue }
+                if line.hasPrefix("?") {
+                    let reply = (onRequest?(String(line.dropFirst())) ?? #"{"ok":false,"reason":"no handler"}"#) + "\n"
+                    _ = Array(reply.utf8).withUnsafeBytes { write(clientFD, $0.baseAddress, $0.count) }
+                } else {
                     onLine(line)
                 }
             }
