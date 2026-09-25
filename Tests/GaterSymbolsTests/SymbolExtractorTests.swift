@@ -102,3 +102,13 @@ final class SymbolExtractorTests: XCTestCase {
         XCTAssertEqual(s.first?.endLine, 3)
     }
 }
+
+final class SymbolDescribeTests: XCTestCase {
+    func testDescribeGivesSignatureAndCode() throws {
+        let source = "export function getUser(\n  id: string,\n  opts: Opts\n): User {\n  return db.get(id)\n}\n"
+        let d = try XCTUnwrap(SymbolExtractor.describe(symbolId: "src/users.ts#getUser", source: source, path: "src/users.ts"))
+        XCTAssertEqual(d.signature, "function getUser( id: string, opts: Opts ): User")
+        XCTAssertTrue(d.code.hasPrefix("function getUser("))
+        XCTAssertNil(SymbolExtractor.describe(symbolId: "src/users.ts#nope", source: source, path: "src/users.ts"))
+    }
+}

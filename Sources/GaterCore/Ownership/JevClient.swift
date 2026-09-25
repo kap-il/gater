@@ -76,10 +76,59 @@ public struct JevClient {
                 "criteria": .object(question.criteria.mapValues { .string($0) }),
             ])
         }
+        let json = try await send(state: state, questions: questionObjects)
+        let answers = json.value(atPath: "answers")?.objectValue ?? [:]
+        var parsed: [String: ChoiceAnswer] = [:]
+        for (name, answer) in answers {
+            guard let choice = answer.value(atPath: "choice")?.stringValue,
+                  case let .number(confidence)? = answer.value(atPath: "confidence") else { continue }
+            var probabilities: [String: Double] = [:]
+            for (option, value) in answer.value(atPath: "probabilities")?.objectValue ?? [:] {
+                if case let .number(p) = value { probabilities[option] = p }
+            }
+            parsed[name] = ChoiceAnswer(choice: choice, confidence: confidence, probabilities: probabilities)
+        }
+        return Response(model: json.value(atPath: "model")?.stringValue ?? config.model,
+                        answers: parsed, inputTokens: Self.inputTokens(json))
+    }
+
+    /// A yes/no ("noul") answer: the probability of yes, 0...1.
+    public struct NoulResponse: Equatable {
+        public var model: String
+        public var answers: [String: Double]
+        public var inputTokens: Int
+    }
+
+    /// Asks yes/no questions about `state`; each answer is P(yes).
+    public func noul(state: JSONValue,
+                     questions: [String: (instructions: String, yes: String, no: String)]) async throws -> NoulResponse {
+        var questionObjects: [String: JSONValue] = [:]
+        for (name, question) in questions {
+            questionObjects[name] = .object([
+                "type": .string("noul"),
+                "instructions": .string(question.instructions),
+                "criteria": .object(["true": .string(question.yes), "false": .string(question.no)]),
+            ])
+        }
+        let json = try await send(state: state, questions: questionObjects)
+        var parsed: [String: Double] = [:]
+        for (name, answer) in json.value(atPath: "answers")?.objectValue ?? [:] {
+            if case let .number(p)? = answer.value(atPath: "noul") { parsed[name] = p }
+        }
+        return NoulResponse(model: json.value(atPath: "model")?.stringValue ?? config.model,
+                            answers: parsed, inputTokens: Self.inputTokens(json))
+    }
+
+    private static func inputTokens(_ json: JSONValue) -> Int {
+        if case let .number(tokens)? = json.value(atPath: "usage.input_tokens") { return Int(tokens) }
+        return 0
+    }
+
+    private func send(state: JSONValue, questions: [String: JSONValue]) async throws -> JSONValue {
         let body = JSONValue.object([
             "model": .string(config.model),
             "state": state,
-            "questions": .object(questionObjects),
+            "questions": .object(questions),
         ])
 
         var request = URLRequest(url: config.baseURL.appendingPathComponent("v1/systemone"))
@@ -94,23 +143,9 @@ public struct JevClient {
             throw ClientError.http(status: status, body: String(decoding: data.prefix(500), as: UTF8.self))
         }
         guard let json = try? JSONDecoder().decode(JSONValue.self, from: data),
-              let answers = json.value(atPath: "answers")?.objectValue else {
+              json.value(atPath: "answers")?.objectValue != nil else {
             throw ClientError.malformedResponse(String(decoding: data.prefix(500), as: UTF8.self))
         }
-
-        var parsed: [String: ChoiceAnswer] = [:]
-        for (name, answer) in answers {
-            guard let choice = answer.value(atPath: "choice")?.stringValue,
-                  case let .number(confidence)? = answer.value(atPath: "confidence") else { continue }
-            var probabilities: [String: Double] = [:]
-            for (option, value) in answer.value(atPath: "probabilities")?.objectValue ?? [:] {
-                if case let .number(p) = value { probabilities[option] = p }
-            }
-            parsed[name] = ChoiceAnswer(choice: choice, confidence: confidence, probabilities: probabilities)
-        }
-        var inputTokens = 0
-        if case let .number(tokens)? = json.value(atPath: "usage.input_tokens") { inputTokens = Int(tokens) }
-        return Response(model: json.value(atPath: "model")?.stringValue ?? config.model,
-                        answers: parsed, inputTokens: inputTokens)
+        return json
     }
 }

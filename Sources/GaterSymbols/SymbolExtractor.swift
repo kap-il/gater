@@ -61,6 +61,24 @@ public enum SymbolExtractor {
 
     /// Symbols in `source`, ids prefixed with `path` (repo-relative).
     public static func symbols(source: String, path: String) throws -> [CodeSymbol] {
+        try extract(source: source, path: path).map(\.symbol)
+    }
+
+    /// A symbol's signature (whitespace-collapsed) and full source text,
+    /// for review questions and wake messages.
+    public static func describe(symbolId: String, source: String, path: String) -> (signature: String, code: String)? {
+        guard let found = try? extract(source: source, path: path).last(where: { $0.symbol.id == symbolId }) else { return nil }
+        let signature = found.signature.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        return (signature.trimmingCharacters(in: CharacterSet(charactersIn: " {=")), found.code)
+    }
+
+    private struct Extracted {
+        var symbol: CodeSymbol
+        var signature: String
+        var code: String
+    }
+
+    private static func extract(source: String, path: String) throws -> [Extracted] {
         guard let grammar = grammar(for: path), let queries else {
             throw SymbolExtractorError.unsupportedLanguage(path)
         }
@@ -74,6 +92,7 @@ public enum SymbolExtractor {
 
         let text = source as NSString
         var found: [CodeSymbol] = []
+        var texts: [String: (signature: String, code: String)] = [:]
         for match in query.execute(in: tree) {
             guard let definition = match.captures.first(where: { $0.name?.hasPrefix("definition.") == true }),
                   let nameNode = match.captures(named: "name").first?.node,
@@ -86,6 +105,8 @@ public enum SymbolExtractor {
             let qualified = (qualifiers(of: node, text: text) + [name]).joined(separator: ".")
             let exported = isExported(node, kind: kind, text: text)
 
+            texts["\(path)#\(qualified)", default: (parts.signature, text.substring(with: node.range))] =
+                (parts.signature, text.substring(with: node.range))
             found.append(CodeSymbol(
                 id: "\(path)#\(qualified)",
                 name: name,
@@ -100,7 +121,10 @@ public enum SymbolExtractor {
                 bodyHash: hash(normalize(parts.body))
             ))
         }
-        return mergeOverloads(found)
+        return mergeOverloads(found).map { symbol in
+            let text = texts[symbol.id] ?? ("", "")
+            return Extracted(symbol: symbol, signature: text.signature, code: text.code)
+        }
     }
 
     // MARK: - Signature / body split
