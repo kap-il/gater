@@ -23,6 +23,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var planStore: PlanStore?
     /// The map's data model (spec §4.11). Main thread only.
     private var mapModel = MapModel()
+    /// Finishing (spec §4.10) runs on its own queue: merges and test runs
+    /// can take a while and mustn't stall symbol analysis.
+    private let lifecycleQueue = DispatchQueue(label: "gater.lifecycle")
+    /// lifecycleQueue only:
+    private var lastDishStates: [String: DishState] = [:]
+    private var referenceEvents: [GaterEvent] = []
+    private var lastHolds: [String: [String]] = [:]
+    /// Dishes merged by this session. The plan only learns they're served
+    /// once the lifecycle event lands (asynchronously), and serving one
+    /// dish triggers another integration pass — without this, a dish merged
+    /// moments ago looked "finished" again and was served twice (seen live).
+    private var integrated: Set<String> = []
     private var mapRefreshScheduled = false
     private var symbolEngine: SymbolEngine?
     /// Parsing is off the main thread and serialized (the engine keeps
@@ -85,6 +97,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let history = (try? EventLog.replay(path: logPath)) ?? []
         overlaps.replay(history, plan: store.current)
         mapModel.replay(history)
+        referenceEvents = history.filter { $0.kind == "references" }
+        // Transitions are announced from now on, never replayed.
+        for dish in store.current.dishes { lastDishStates[dish.id] = dish.state }
+        store.onChange = { [weak self] plan in self?.lifecycleQueue.async { self?.planChanged(plan) } }
         for event in history where event.kind == "symbols_changed" {
             for change in event.fields["changes"]?.arrayValue ?? [] {
                 guard let id = change.value(atPath: "id")?.stringValue,
@@ -180,6 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController?.eventFeed.append(stored)
         mapModel.apply(stored)
         scheduleMapRefresh()
+        if stored.kind == "references" { lifecycleQueue.async { [weak self] in self?.referenceEvents.append(stored) } }
         symbolQueue.async { [weak self] in self?.detectOverlaps(stored) }
     }
 
@@ -281,6 +298,148 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.mapRefreshScheduled = false
             self.windowController?.map.update(features: self.mapModel.features(plan: plan), activity: self.mapModel.activity,
                                               edges: self.mapModel.usageEdges(plan: plan))
+        }
+    }
+
+    // MARK: - Finishing (spec §4.10)
+
+    /// Runs on lifecycleQueue after every plan change.
+    private func planChanged(_ plan: Plan) {
+        var reachedPass: [Dish] = []
+        var finishing = false
+        for dish in plan.dishes {
+            let previous = lastDishStates[dish.id]
+            lastDishStates[dish.id] = dish.state
+            guard previous != dish.state else { continue }
+            if dish.state == .pass { reachedPass.append(dish) }
+            if dish.state == .cooking { integrated.remove(dish.id) } // reopened: may be served again
+            if dish.state == .finished || dish.state == .served { finishing = true }
+        }
+        reachedPass.forEach(reportPass)
+        if finishing { integrate(plan: plan) }
+    }
+
+    /// The dish's worktree, and the commit it started from (symbolQueue
+    /// owns those maps).
+    private func worktreeAndBase(for dish: Dish) -> (worktree: String, base: String?)? {
+        guard let pane = dish.pane, pane.hasPrefix("delegate-") else { return nil }
+        return symbolQueue.sync {
+            let worktree = agentWorktrees[pane]
+                ?? GitWorktree.path(forDelegate: String(pane.dropFirst("delegate-".count)), repoRoot: paneManager.repoRoot)
+            return (worktree, worktreeBase[SymbolEngine.canonical(worktree)])
+        }
+    }
+
+    /// pass → the orchestrator gets the dish's diff plus its done note.
+    private func reportPass(_ dish: Dish) {
+        guard let (worktree, knownBase) = worktreeAndBase(for: dish) else { return }
+        // Base: where the dish started; else where its branch left main.
+        let base = knownBase
+            ?? (try? GitWorktree.git(["merge-base", "HEAD", "main"], in: worktree))?.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? "HEAD~1"
+        let diff = Integrator.passDiff(worktree: worktree, base: base)
+        let text = LifecycleMessages.pass(dish: dish, did: dish.did, assumed: dish.assumed, worktree: worktree,
+                                          base: String(base.prefix(12)), stat: diff.stat, diff: diff.diff,
+                                          truncated: diff.truncated)
+        wakeOrchestrator(text, kind: "pass_report", extra: ["dish": .string(dish.id)])
+    }
+
+    /// finish → merge what's ready into gater/integration, in dependency
+    /// order; hold the rest; test after each merge; serve and clean up.
+    private func integrate(plan: Plan) {
+        let finished = Set(plan.dishes.filter { $0.state == .finished }.map(\.id)).subtracting(integrated)
+        guard !finished.isEmpty else { return }
+        let served = Set(plan.dishes.filter { $0.state == .served }.map(\.id)).union(integrated)
+        let decision = IntegrationPlanner.decide(
+            finished: finished, served: served,
+            dependencies: IntegrationPlanner.dependencies(from: referenceEvents, plan: plan))
+
+        for (dish, waiting) in decision.held where lastHolds[dish] != waiting {
+            lastHolds[dish] = waiting
+            record(onMain: GaterEvent(kind: "lifecycle_hold", extra: [
+                "dish": .string(dish), "waiting_on": .array(waiting.map { .string($0) }),
+            ]))
+        }
+
+        let integrator = Integrator(repoRoot: paneManager.repoRoot)
+        let testCommand = GaterConfig.load(repoRoot: paneManager.repoRoot).testCommand
+        for unit in decision.merge {
+            let dishes = unit.compactMap { id in plan.dishes.first { $0.id == id } }
+            let branches = dishes.compactMap { $0.pane.map { "gater/" + $0.dropFirst("delegate-".count) } }
+            guard branches.count == dishes.count, !branches.isEmpty else { continue }
+            let summary = dishes.map { "\($0.id) \($0.feature): \($0.directive)" }.joined(separator: "; ")
+            do {
+                switch try integrator.merge(branches: branches, message: "Serve \(summary)\n\nGater-Dish: \(unit.joined(separator: ", "))") {
+                case let .merged(commit):
+                    let tests = integrator.runTests(command: testCommand)
+                    serve(dishes, commit: commit, tests: tests, integrator: integrator, plan: plan)
+                case .upToDate:
+                    serve(dishes, commit: GitWorktree.head(of: integrator.worktree) ?? "", tests: nil,
+                          integrator: integrator, plan: plan)
+                case let .conflict(files):
+                    wakeOrchestrator(LifecycleMessages.conflict(dishes: unit, files: files), kind: "merge_conflict",
+                                     extra: ["dishes": .array(unit.map { .string($0) }), "files": .array(files.map { .string($0) })])
+                }
+            } catch {
+                record(onMain: GaterEvent(kind: "lifecycle_error", extra: ["text": .string("\(error)")]))
+            }
+        }
+    }
+
+    /// served: log it (the plan moves the dishes), report to the
+    /// orchestrator, and retire delegates with no live work left: close
+    /// the pane (stopping its language server) and remove the worktree
+    /// folder, keeping the branch.
+    private func serve(_ dishes: [Dish], commit: String, tests: Integrator.TestRun?, integrator: Integrator, plan: Plan) {
+        integrated.formUnion(dishes.map(\.id))
+        for dish in dishes {
+            record(onMain: GaterEvent(kind: "lifecycle", extra: [
+                "dish": .string(dish.id), "state": .string("served"), "merge": .string(commit),
+            ]))
+        }
+        if let tests {
+            record(onMain: GaterEvent(kind: "tests", extra: [
+                "dishes": .array(dishes.map { .string($0.id) }), "passed": .bool(tests.passed), "tail": .string(tests.tail),
+            ]))
+        }
+        wakeOrchestrator(LifecycleMessages.served(dishes: dishes.map(\.id), commit: commit,
+                                                  integrationWorktree: integrator.worktree, tests: tests),
+                         kind: "served_report", extra: [:])
+
+        let servedIds = Set(dishes.map(\.id))
+        for pane in Set(dishes.compactMap(\.pane)) {
+            let stillCooking = plan.dishes.contains {
+                $0.pane == pane && !servedIds.contains($0.id) && [.cooking, .pass, .finished].contains($0.state)
+            }
+            guard !stillCooking, let (worktree, _) = worktreeAndBase(for: dishes.first { $0.pane == pane }!) else { continue }
+            DispatchQueue.main.sync {
+                if let open = paneManager.pane(id: pane) { paneManager.close(open) }
+            }
+            // Give the session a moment to exit before its folder goes.
+            Thread.sleep(forTimeInterval: 1)
+            let removed = GitWorktree.remove(worktree: worktree, repoRoot: paneManager.repoRoot)
+            record(onMain: GaterEvent(kind: removed ? "worktree_removed" : "worktree_kept", extra: [
+                "pane": .string(pane), "worktree": .string(worktree),
+                "text": .string(removed ? "branch kept" : "has uncommitted changes; left in place"),
+            ]))
+        }
+    }
+
+    private func record(onMain event: GaterEvent) {
+        DispatchQueue.main.async { [weak self] in self?.record(event) }
+    }
+
+    /// Types a report into the orchestrator and logs it.
+    private func wakeOrchestrator(_ text: String, kind: String, extra: [String: JSONValue]) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            var fields = extra
+            fields["text"] = .string(text)
+            if let orchestrator = self.paneManager.orchestrator {
+                orchestrator.inject(text: text)
+                fields["pane"] = .string(orchestrator.id)
+            }
+            self.record(GaterEvent(kind: kind, extra: fields))
         }
     }
 

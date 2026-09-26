@@ -27,9 +27,12 @@ public struct Dish: Codable, Equatable {
     public var mergedInto: String?
     public var createdAt: String
     public var updatedAt: String
+    /// From the latest GATER-DONE note.
+    public var did: String?
+    public var assumed: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, feature, directive, scope, pane, state, instructions
+        case id, feature, directive, scope, pane, state, instructions, did, assumed
         case mergedInto = "merged_into"
         case createdAt = "created_at"
         case updatedAt = "updated_at"

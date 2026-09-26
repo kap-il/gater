@@ -40,6 +40,8 @@ public enum PlanReducer {
             }
             guard plan.dishes[index].state == .cooking else { return false }
             plan.dishes[index].state = .pass
+            plan.dishes[index].did = event["did"]?.stringValue
+            plan.dishes[index].assumed = event["assumed"]?.stringValue
             plan.dishes[index].updatedAt = ts
             return record(&plan, ts: ts, type: "done", dish: id, summary: "\(id) → pass",
                           reason: event["did"]?.stringValue)

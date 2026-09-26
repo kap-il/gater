@@ -199,6 +199,10 @@ final class FeatureCardView: NSView {
             if let pane = dish.pane, let now = activity[pane] {
                 content.addArrangedSubview(Label.make("now: \(now.text)", size: 10, color: .secondaryLabelColor, wraps: true))
             }
+            if !dish.waitingOn.isEmpty {
+                content.addArrangedSubview(Label.make("⏸ waiting on \(dish.waitingOn.joined(separator: ", ")) to merge first",
+                                                      size: 10, color: .systemPurple, wraps: true))
+            }
             for instruction in dish.instructions {
                 content.addArrangedSubview(Label.make("↳ instruct: \(instruction)", size: 10,
                                                       color: .systemOrange, wraps: true))

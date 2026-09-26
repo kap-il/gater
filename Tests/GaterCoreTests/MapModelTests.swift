@@ -110,4 +110,20 @@ final class MapModelTests: XCTestCase {
         XCTAssertEqual(sites.first?.line, 4)
         XCTAssertTrue(map.useSites(inPane: "delegate-auth").isEmpty)
     }
+
+    func testHeldDishShowsWhatItsWaitingOnUntilServed() {
+        let finish = e("delegation", ["pane": .string("orch"), "gater": .object(["type": .string("finish"), "id": .string("d-002")])])
+        let hold = e("lifecycle_hold", ["dish": .string("d-002"), "waiting_on": .array([.string("d-001")])])
+        var events = golden + [finish, hold]
+        var map = MapModel()
+        map.replay(events)
+        let dash = map.features(plan: PlanReducer.replay(events)).first { $0.name == "Dashboard" }
+        XCTAssertEqual(dash?.dishes.first?.waitingOn, ["d-001"])
+
+        events.append(e("lifecycle", ["dish": .string("d-002"), "state": .string("served")]))
+        map.apply(events.last!)
+        let served = map.features(plan: PlanReducer.replay(events)).first { $0.name == "Dashboard" }
+        XCTAssertEqual(served?.status, .served)
+        XCTAssertEqual(served?.dishes.first?.waitingOn, [])
+    }
 }

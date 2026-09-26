@@ -42,6 +42,8 @@ public struct MapModel {
         /// GATER-DONE `did` / `assumed`, once posted.
         public var did: String?
         public var assumed: String?
+        /// Finished but held: the unmerged dishes it's waiting on.
+        public var waitingOn: [String] = []
     }
 
     public struct Activity: Equatable {
@@ -77,6 +79,7 @@ public struct MapModel {
     private var overlapNode: [String: String] = [:]
     private var references: [String: (symbol: String, fromPane: String?, inPane: String, sites: [String])] = [:]
     private var doneNotes: [String: (did: String, assumed: String)] = [:]
+    private var holds: [String: [String]] = [:]
     public private(set) var activity: [String: Activity] = [:]
 
     public init() {}
@@ -114,6 +117,13 @@ public struct MapModel {
             guard let symbol = event["symbol"]?.stringValue, let inPane = event["in_pane"]?.stringValue else { return }
             references["\(symbol)|\(inPane)"] = (symbol, event["from_pane"]?.stringValue, inPane,
                                                  (event.fields["sites"]?.arrayValue ?? []).compactMap(\.stringValue))
+
+        case "lifecycle_hold":
+            if let dish = event["dish"]?.stringValue {
+                holds[dish] = (event.fields["waiting_on"]?.arrayValue ?? []).compactMap(\.stringValue)
+            }
+        case "lifecycle":
+            if let dish = event["dish"]?.stringValue, event["state"]?.stringValue == "served" { holds[dish] = nil }
 
         case "done_note":
             if let dish = event["dish"]?.stringValue {
@@ -181,7 +191,8 @@ public struct MapModel {
                 dishes: dishes.map { dish in
                     DishCard(id: dish.id, directive: dish.directive, state: dish.state, pane: dish.pane,
                              scope: dish.scope, instructions: dish.instructions,
-                             did: doneNotes[dish.id]?.did, assumed: doneNotes[dish.id]?.assumed)
+                             did: doneNotes[dish.id]?.did ?? dish.did, assumed: doneNotes[dish.id]?.assumed ?? dish.assumed,
+                             waitingOn: dish.state == .finished ? (holds[dish.id] ?? []) : [])
                 },
                 agents: Array(Set(dishes.compactMap(\.pane))).sorted(),
                 files: files,

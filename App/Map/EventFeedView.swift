@@ -106,8 +106,15 @@ final class EventFeedView: NSView {
             var confidence = ""
             if case let .number(c)? = event["confidence"] { confidence = String(format: " %.2f", c) }
             detail = "Jev: \(event["verdict"]?.stringValue ?? "?")\(confidence)"
-        case "wake":
+        case "pass_report", "served_report", "merge_conflict", "wake":
             detail = (event["text"]?.stringValue ?? "").split(separator: "\n").first.map(String.init) ?? ""
+        case "lifecycle":
+            detail = "\(event["dish"]?.stringValue ?? "?") → \(event["state"]?.stringValue ?? "?")"
+        case "lifecycle_hold":
+            let waiting = (event.fields["waiting_on"]?.arrayValue ?? []).compactMap(\.stringValue)
+            detail = "\(event["dish"]?.stringValue ?? "?") waiting on \(waiting.joined(separator: ", "))"
+        case "tests":
+            detail = event["passed"] == .bool(true) ? "passed" : "FAILED"
         case "done_note":
             detail = "\(event["dish"]?.stringValue ?? "?"): \(event["did"]?.stringValue ?? "")"
         default:
