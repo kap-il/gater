@@ -11,3 +11,5 @@ xcuserdata/
 Vendor/ghostty/build/
 Vendor/ghostty/GhosttyVT.xcframework/
 .env
+.gstack/
+.internal/
