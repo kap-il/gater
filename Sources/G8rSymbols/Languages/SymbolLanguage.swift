@@ -14,9 +14,12 @@ struct SymbolLanguage {
     let query: Query?
     /// Node types that are names. These are what `uses` counts.
     let identifiers: Set<String>
-    /// Node types that are comments and string literals. `uses` never looks
-    /// inside them, so a name mentioned in prose isn't taken for a use.
+    /// Node types that are comments and string literals. `uses` counts
+    /// nothing in them, so a name mentioned in prose isn't taken for a use.
     let prose: Set<String>
+    /// Node types that hold code inside a string literal. What they hold
+    /// is counted like any other code.
+    let interpolations: Set<String>
     /// Node types whose contents are locals, not symbols.
     let scopes: Set<String>
     /// The name a node lends to the declarations inside it, for the nodes
@@ -36,6 +39,7 @@ struct SymbolLanguage {
          symbols: String,
          identifiers: Set<String>,
          prose: Set<String>,
+         interpolations: Set<String>,
          scopes: Set<String>,
          qualifier: @escaping (Node, NSString) -> String?,
          isExported: @escaping (Node, NSString) -> Bool,
@@ -45,6 +49,7 @@ struct SymbolLanguage {
         self.query = try? Query(language: grammar, data: Data(symbols.utf8))
         self.identifiers = identifiers
         self.prose = prose
+        self.interpolations = interpolations
         self.scopes = scopes
         self.qualifier = qualifier
         self.isExported = isExported

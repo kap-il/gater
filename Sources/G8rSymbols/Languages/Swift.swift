@@ -30,6 +30,7 @@ extension SymbolLanguage {
             "comment", "multiline_comment",
             "line_string_literal", "multi_line_string_literal", "raw_string_literal", "regex_literal",
         ],
+        interpolations: ["interpolated_expression"],
         // Every block of code is a `statements` node, and nothing else is:
         // the members of a type and the top of a file hang off their parent
         // directly.

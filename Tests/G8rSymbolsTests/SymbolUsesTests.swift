@@ -27,9 +27,38 @@ final class SymbolUsesTests: XCTestCase {
         XCTAssertNil(uses["func"], "keywords are not identifiers")
     }
 
-    func testCodeInterpolatedIntoAStringIsInsideTheString() {
-        let uses = SymbolExtractor.uses(source: #"let line = "on \(EventBus.shared)""#, path: "Main.swift")
-        XCTAssertEqual(uses, ["line": 1])
+    /// Code inside an interpolation is code. The words of the literal
+    /// around it still count for nothing.
+    func testSwiftCountsInterpolatedCodeAndNotTheLiteral() {
+        let uses = SymbolExtractor.uses(source: ##"""
+        let line = "EventBus is on \(EventBus.shared) for Widget"
+        let long = """
+            Widget \(Widget.make(name: "Widget \(EventBus.count)"))
+            """
+        let raw = #"EventBus \#(Gadget.one) and not \(Widget.two)"#
+        """##, path: "Main.swift")
+
+        XCTAssertEqual(uses, [
+            "line": 1, "long": 1, "raw": 1,
+            "EventBus": 2, "shared": 1, "count": 1,
+            "Widget": 1, "make": 1, "name": 1,
+            "Gadget": 1, "one": 1,
+        ], "a string inside an interpolation is a string again, and `\\(` in a raw string is text")
+    }
+
+    func testTypeScriptCountsInterpolatedCodeAndNotTheLiteral() {
+        let uses = SymbolExtractor.uses(source: #"""
+        const line = `Gadget is ${Gadget.name} for Widget`;
+        const nested = `Widget ${make(`Widget ${Gadget.count}`)}`;
+        const plain = "Gadget ${Widget}";
+        type Key = `Gadget-${Widget}`;
+        """#, path: "src/line.ts")
+
+        XCTAssertEqual(uses, [
+            "line": 1, "nested": 1, "plain": 1, "Key": 1,
+            "Gadget": 2, "name": 1, "count": 1, "make": 1,
+            "Widget": 1,
+        ], "only the type in the template literal type names Widget")
     }
 
     func testTypeScriptCountsANameInCodeAndNotInProse() {

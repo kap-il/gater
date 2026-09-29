@@ -6,6 +6,15 @@ public enum SymbolExtractorError: Error, Equatable {
     case parseFailed(String)
 }
 
+/// A symbol with the text of its declaration.
+struct SymbolDescription: Equatable {
+    var symbol: CodeSymbol
+    /// The declaration without its body, on one line.
+    var signature: String
+    /// The declaration as written, body and all.
+    var code: String
+}
+
 /// Extracts symbols from source code with tree-sitter.
 ///
 /// This is the part that is the same for every language. What differs, the
@@ -19,24 +28,20 @@ public enum SymbolExtractor {
 
     /// Symbols in `source`, ids prefixed with `path` (repo-relative).
     public static func symbols(source: String, path: String) throws -> [CodeSymbol] {
-        try extract(source: source, path: path).map(\.symbol)
+        try describeAll(source: source, path: path).map(\.symbol)
     }
 
     /// A symbol's signature (whitespace-collapsed) and full source text,
     /// for review questions and wake messages.
     public static func describe(symbolId: String, source: String, path: String) -> (signature: String, code: String)? {
-        guard let found = try? extract(source: source, path: path).last(where: { $0.symbol.id == symbolId }) else { return nil }
-        let signature = found.signature.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-        return (signature.trimmingCharacters(in: CharacterSet(charactersIn: " {=")), found.code)
+        guard let found = try? describeAll(source: source, path: path).last(where: { $0.symbol.id == symbolId }) else { return nil }
+        return (found.signature, found.code)
     }
 
-    private struct Extracted {
-        var symbol: CodeSymbol
-        var signature: String
-        var code: String
-    }
-
-    private static func extract(source: String, path: String) throws -> [Extracted] {
+    /// Every symbol in `source` with its signature and code, from one
+    /// parse. `describe` parses the file to answer for one symbol, so
+    /// whoever wants them all asks here.
+    static func describeAll(source: String, path: String) throws -> [SymbolDescription] {
         guard let language = SymbolLanguage.reading(path), let query = language.query else {
             throw SymbolExtractorError.unsupportedLanguage(path)
         }
@@ -75,7 +80,12 @@ public enum SymbolExtractor {
         }
         return mergeOverloads(found).map { symbol in
             let text = texts[symbol.id] ?? ("", "")
-            return Extracted(symbol: symbol, signature: text.signature, code: text.code)
+            let signature = text.signature.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            return SymbolDescription(
+                symbol: symbol,
+                signature: signature.trimmingCharacters(in: CharacterSet(charactersIn: " {=")),
+                code: text.code
+            )
         }
     }
 

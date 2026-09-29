@@ -38,7 +38,10 @@ extension SymbolLanguage {
                 "identifier", "type_identifier", "property_identifier", "private_property_identifier",
                 "shorthand_property_identifier", "shorthand_property_identifier_pattern",
             ],
-            prose: ["comment", "html_comment", "string", "template_string", "regex", "jsx_text"],
+            prose: [
+                "comment", "html_comment", "string", "template_string", "template_literal_type", "regex", "jsx_text",
+            ],
+            interpolations: ["template_substitution", "template_type"],
             scopes: [
                 "function_declaration", "generator_function_declaration", "method_definition",
                 "arrow_function", "function_expression", "function", "generator_function",
