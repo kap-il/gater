@@ -1,13 +1,13 @@
 import AppKit
-import GaterCore
-import GaterTerminal
+import G8rCore
+import G8rTerminal
 
-/// Creates panes with the right command, cwd, and GATER_* environment, and
+/// Creates panes with the right command, cwd, and G8R_* environment, and
 /// logs what humans type into delegate panes.
 final class PaneManager {
     let repoRoot: String
     /// Appends to the event log (and the live feed); owned by the app.
-    private let record: (GaterEvent) -> Void
+    private let record: (G8rEvent) -> Void
     private(set) var panes: [Pane] = []
     private var shellCount = 0
     /// Per-pane text typed since the last Enter, for human_intervention.
@@ -17,16 +17,16 @@ final class PaneManager {
     var onPaneRemoved: ((Pane) -> Void)?
     var onPaneTitleChanged: ((Pane) -> Void)?
 
-    /// Claude Code's cross-session send tool, as it appears in hook
-    /// payloads' `tool_name`. Overridable while the name is being verified.
-    var delegationTool = ProcessInfo.processInfo.environment["GATER_DELEGATION_TOOL_NAME"] ?? PaneManager.defaultDelegationTool
-    static let defaultDelegationTool = "SendMessage"
+    /// Mark worktrees G8r creates as trusted in Claude Code before a
+    /// session starts there (only if the repo itself is trusted). Off
+    /// unless the user turned it on.
+    var trustWorktrees = false
 
     /// The command the orchestrator and delegates run. Overridable so the
     /// terminal can be exercised without claude installed.
-    var agentCommand = ProcessInfo.processInfo.environment["GATER_AGENT_COMMAND"] ?? "claude"
+    var agentCommand = ProcessInfo.processInfo.environment["G8R_AGENT_COMMAND"] ?? "claude"
 
-    init(repoRoot: String, record: @escaping (GaterEvent) -> Void) {
+    init(repoRoot: String, record: @escaping (G8rEvent) -> Void) {
         self.repoRoot = repoRoot
         self.record = record
     }
@@ -38,8 +38,7 @@ final class PaneManager {
     // MARK: - Spawning
 
     /// `claude --name <pane id>`: the session's display name matches the
-    /// pane id, so the orchestrator can address a delegate predictably
-    /// (SendMessage `to`) and it lines up with "pane" in the event log.
+    /// pane id, so it lines up with "pane" in the event log.
     /// Custom agent commands that aren't claude are run as-is.
     private func agentCommand(named id: String) -> String {
         let program = agentCommand.split(separator: " ").first.map { ($0 as NSString).lastPathComponent }
@@ -54,15 +53,16 @@ final class PaneManager {
                          worktree: repoRoot, command: agentCommand(named: "orch"))
     }
 
-    /// "New delegate": creates `../<repo>-<name>` on `gater/<name>` and
+    /// "New delegate": creates `../<repo>-<name>` on `g8r/<name>` and
     /// launches the agent in it.
     @discardableResult
-    func spawnDelegate(name: String, spawnedBy: String? = nil) throws -> Pane {
+    func spawnDelegate(name: String) throws -> Pane {
         let id = "delegate-\(name)"
         if let existing = pane(id: id) { return existing }
         let worktree = try GitWorktree.ensure(delegate: name, repoRoot: repoRoot)
-        return try spawn(id: id, role: .delegate, name: name, worktree: worktree, command: agentCommand(named: id),
-                         spawnedBy: spawnedBy)
+        // Must happen before claude starts, or it shows the trust prompt.
+        if trustWorktrees { try? ClaudeTrust.trustWorktree(worktree, createdFrom: repoRoot) }
+        return try spawn(id: id, role: .delegate, name: name, worktree: worktree, command: agentCommand(named: id))
     }
 
     @discardableResult
@@ -72,23 +72,14 @@ final class PaneManager {
                          worktree: directory ?? repoRoot, command: nil)
     }
 
-    private func spawn(id: String, role: PaneRole, name: String, worktree: String, command: String?,
-                       spawnedBy: String? = nil) throws -> Pane {
-        var env: [String: String] = [
-            "GATER_PANE_ID": id,
-            "GATER_ROLE": role.rawValue,
-            "GATER_WORKTREE": worktree,
-            // Where gater-hook finds .gater/plan.json (delegates run in
-            // sibling worktrees, not the repo itself).
-            "GATER_REPO": repoRoot,
-        ]
+    private func spawn(id: String, role: PaneRole, name: String, worktree: String, command: String?) throws -> Pane {
+        var env: [String: String] = [:]
         if let path = pathWithHookDirectory() { env["PATH"] = path }
-        env["GATER_DELEGATION_TOOL_NAME"] = delegationTool
-        if role != .shell { installHooks(in: worktree) }
-        if role == .shell {
-            // Shell panes aren't tracked; don't let their hooks claim a pane.
-            env["GATER_PANE_ID"] = nil
-            env["GATER_ROLE"] = nil
+        if role != .shell {
+            // Shell panes aren't tracked: without a pane id, g8r-hook
+            // stays silent for anything run in them.
+            env["G8R_PANE_ID"] = id
+            installHooks(in: worktree)
         }
 
         let config = LaunchConfig.loginShell(command: command, workingDirectory: worktree,
@@ -105,11 +96,9 @@ final class PaneManager {
         }
 
         panes.append(pane)
-        var opened: [String: JSONValue] = [
+        log(G8rEvent(kind: "pane_opened", extra: [
             "pane": .string(id), "role": .string(role.rawValue), "worktree": .string(worktree),
-        ]
-        if let spawnedBy { opened["spawned_by"] = .string(spawnedBy) }
-        log(GaterEvent(kind: "pane_opened", extra: opened))
+        ]))
         onPaneAdded?(pane)
         return pane
     }
@@ -118,7 +107,7 @@ final class PaneManager {
         pane.session.terminate()
         panes.removeAll { $0 === pane }
         lineBuffers[pane.id] = nil
-        log(GaterEvent(kind: "pane_closed", extra: ["pane": .string(pane.id)]))
+        log(G8rEvent(kind: "pane_closed", extra: ["pane": .string(pane.id)]))
         onPaneRemoved?(pane)
     }
 
@@ -126,17 +115,7 @@ final class PaneManager {
         for pane in panes { pane.session.terminate() }
     }
 
-    // MARK: - Injection
-
-    /// Injects into a pane by id; returns false if there's no such pane.
-    @discardableResult
-    func inject(text: String, into paneId: String, submit: Bool = true) -> Bool {
-        guard let pane = pane(id: paneId) else { return false }
-        pane.inject(text: text, submit: submit)
-        return true
-    }
-
-    // MARK: - human_intervention (spec §8 decision 3)
+    // MARK: - human_intervention
 
     /// Reconstructs the line a human typed into a delegate pane and logs it
     /// on Enter. It's a best-effort line (cursor movement inside the line
@@ -153,61 +132,41 @@ final class PaneManager {
         case .submitted:
             let text = lineBuffers[pane] ?? ""
             lineBuffers[pane] = ""
-            log(GaterEvent(kind: "human_intervention", extra: ["pane": .string(pane), "text": .string(text)]))
+            log(G8rEvent(kind: "human_intervention", extra: ["pane": .string(pane), "text": .string(text)]))
         }
     }
 
-    private func log(_ event: GaterEvent) {
+    private func log(_ event: G8rEvent) {
         record(event)
     }
 
-    /// Writes Gater's hooks into the pane's worktree so its `claude` reports
+    /// Writes G8r's hooks into the pane's worktree so its `claude` reports
     /// to the event bus. Best-effort: a pane without hooks still works as a
     /// terminal, so failures are logged rather than blocking the spawn.
     private func installHooks(in worktree: String) {
         guard let hook = hookBinaryPath() else {
-            log(GaterEvent(kind: "hooks_error", extra: ["text": .string("gater-hook binary not found next to Gater")]))
+            log(G8rEvent(kind: "hooks_error", extra: ["text": .string("g8r-hook binary not found next to G8r")]))
             return
         }
         do {
-            try HookInstaller.install(into: worktree, config: .init(hookBinary: hook, delegationTool: delegationTool))
+            try HookInstaller.install(into: worktree, config: .init(hookBinary: hook))
         } catch {
-            log(GaterEvent(kind: "hooks_error", extra: ["text": .string("\(worktree): \(error)")]))
-        }
-    }
-
-    /// Repo-wide installs, once per launch: the orchestrator's delegation
-    /// skill and the commit-trailer git hook (shared by all worktrees).
-    func installRepoIntegrations() {
-        do {
-            try RepoInstaller.installSkill(repoRoot: repoRoot)
-        } catch {
-            log(GaterEvent(kind: "hooks_error", extra: ["text": .string("skill: \(error)")]))
-        }
-        guard let hook = hookBinaryPath() else { return }
-        do {
-            if case let .skippedForeignHook(path) = try RepoInstaller.installCommitHook(repoRoot: repoRoot, hookBinary: hook) {
-                log(GaterEvent(kind: "hooks_error", extra: [
-                    "text": .string("\(path) exists and isn't Gater's; commit trailers disabled"),
-                ]))
-            }
-        } catch {
-            log(GaterEvent(kind: "hooks_error", extra: ["text": .string("commit hook: \(error)")]))
+            log(G8rEvent(kind: "hooks_error", extra: ["text": .string("\(worktree): \(error)")]))
         }
     }
 
     private func hookBinaryPath() -> String? {
         guard let exe = Bundle.main.executableURL else { return nil }
-        let path = exe.deletingLastPathComponent().appendingPathComponent("gater-hook").path
+        let path = exe.deletingLastPathComponent().appendingPathComponent("g8r-hook").path
         return FileManager.default.isExecutableFile(atPath: path) ? path : nil
     }
 
-    /// Prepends the directory holding `gater-hook` (built next to the app
+    /// Prepends the directory holding `g8r-hook` (built next to the app
     /// binary) so the hook commands in .claude/settings.json resolve.
     private func pathWithHookDirectory() -> String? {
         guard let exe = Bundle.main.executableURL else { return nil }
         let dir = exe.deletingLastPathComponent().path
-        guard FileManager.default.isExecutableFile(atPath: (dir as NSString).appendingPathComponent("gater-hook")) else {
+        guard FileManager.default.isExecutableFile(atPath: (dir as NSString).appendingPathComponent("g8r-hook")) else {
             return nil
         }
         let current = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"

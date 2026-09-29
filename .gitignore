@@ -3,13 +3,11 @@
 DerivedData/
 *.xcuserstate
 xcuserdata/
-.gater/events.jsonl
-.gater/plan.json
-.gater/snapshots/*
-!.gater/snapshots/.gitkeep
 .DS_Store
 Vendor/ghostty/build/
 Vendor/ghostty/GhosttyVT.xcframework/
-.env
+.g8r/
 .gstack/
 .internal/
+planmap/map.js
+planmap/test.log

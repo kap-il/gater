@@ -2,14 +2,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "Gater",
+    name: "G8r",
     platforms: [
         .macOS(.v13)
     ],
     products: [
-        .library(name: "GaterCore", targets: ["GaterCore"]),
-        .library(name: "GaterSymbols", targets: ["GaterSymbols"]),
-        .executable(name: "gater-hook", targets: ["gater-hook"])
+        .library(name: "G8rCore", targets: ["G8rCore"]),
+        .library(name: "G8rSymbols", targets: ["G8rSymbols"]),
+        .executable(name: "g8r-hook", targets: ["g8r-hook"])
     ],
     dependencies: [
         .package(url: "https://github.com/ChimeHQ/SwiftTreeSitter", exact: "0.9.0"),
@@ -17,44 +17,44 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "GaterCore",
-            path: "Sources/GaterCore"
+            name: "G8rCore",
+            path: "Sources/G8rCore"
         ),
         .executableTarget(
-            name: "gater-hook",
-            dependencies: ["GaterCore"],
-            path: "Sources/gater-hook"
+            name: "g8r-hook",
+            dependencies: ["G8rCore"],
+            path: "Sources/g8r-hook"
         ),
         .testTarget(
-            name: "GaterCoreTests",
-            dependencies: ["GaterCore"],
-            path: "Tests/GaterCoreTests"
+            name: "G8rCoreTests",
+            dependencies: ["G8rCore"],
+            path: "Tests/G8rCoreTests"
         ),
-        // tree-sitter symbol engine (spec §4.6). Separate from GaterCore so
-        // the core stays dependency-free.
+        // tree-sitter symbol engine. Separate from G8rCore so the core
+        // stays dependency-free.
         .target(
-            name: "GaterSymbols",
+            name: "G8rSymbols",
             dependencies: [
-                "GaterCore",
+                "G8rCore",
                 .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
                 .product(name: "TreeSitterTypeScript", package: "tree-sitter-typescript"),
             ],
-            path: "Sources/GaterSymbols"
+            path: "Sources/G8rSymbols"
         ),
         .testTarget(
-            name: "GaterSymbolsTests",
-            dependencies: ["GaterSymbols"],
-            path: "Tests/GaterSymbolsTests"
+            name: "G8rSymbolsTests",
+            dependencies: ["G8rSymbols"],
+            path: "Tests/G8rSymbolsTests"
         )
     ]
 )
 
 // The terminal and app are macOS-only: they need libghostty-vt (built by
 // scripts/build-ghostty.sh) and AppKit. Keeping them out of the Linux graph
-// preserves the spec's "GaterCore builds and tests on Linux" split.
+// lets G8rCore build and test on Linux.
 #if os(macOS)
 package.products += [
-    .executable(name: "Gater", targets: ["Gater"])
+    .executable(name: "G8r", targets: ["G8r"])
 ]
 package.targets += [
     .binaryTarget(
@@ -62,23 +62,23 @@ package.targets += [
         path: "Vendor/ghostty/GhosttyVT.xcframework"
     ),
     .target(
-        name: "GaterPTY",
-        path: "Sources/GaterPTY"
+        name: "G8rPTY",
+        path: "Sources/G8rPTY"
     ),
     .target(
-        name: "GaterTerminal",
-        dependencies: ["GhosttyVT", "GaterPTY"],
-        path: "Sources/GaterTerminal"
+        name: "G8rTerminal",
+        dependencies: ["GhosttyVT", "G8rPTY"],
+        path: "Sources/G8rTerminal"
     ),
     .executableTarget(
-        name: "Gater",
-        dependencies: ["GaterCore", "GaterTerminal", "GaterSymbols"],
+        name: "G8r",
+        dependencies: ["G8rCore", "G8rTerminal"],
         path: "App"
     ),
     .testTarget(
-        name: "GaterTerminalTests",
-        dependencies: ["GaterTerminal"],
-        path: "Tests/GaterTerminalTests"
+        name: "G8rTerminalTests",
+        dependencies: ["G8rTerminal"],
+        path: "Tests/G8rTerminalTests"
     )
 ]
 #endif

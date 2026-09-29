@@ -1,8 +1,8 @@
 import AppKit
-import GaterTerminal
+import G8rTerminal
 
 enum PaneRole: String {
-    /// Exactly one per session; runs the planning `claude`.
+    /// Exactly one per session; runs `claude` in the repo itself.
     case orchestrator
     /// One per worktree; runs a working `claude`.
     case delegate
@@ -13,7 +13,7 @@ enum PaneRole: String {
 /// A terminal pane: its identity in the event log, where it runs, and the
 /// live session + view.
 final class Pane {
-    /// Written to GATER_PANE_ID, so it's what hook events carry as "pane".
+    /// Written to G8R_PANE_ID, so it's what hook events carry as "pane".
     let id: String
     let role: PaneRole
     let name: String
@@ -38,8 +38,7 @@ final class Pane {
         }
     }
 
-    /// Types `text` into the pane as if the user had (spec §4.1 item 7).
-    /// This is how Gater wakes the orchestrator.
+    /// Types `text` into the pane as if the user had.
     func inject(text: String, submit: Bool = true) {
         session.inject(text: text, submit: submit)
     }

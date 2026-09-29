@@ -96,7 +96,7 @@ final class PaneTileView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func refreshTitle() {
-        let branch = "gater/\(pane.name)"
+        let branch = "g8r/\(pane.name)"
         let live = pane.session.title
         titleLabel.stringValue = live.isEmpty
             ? "\(pane.displayTitle)  ·  \(branch)"

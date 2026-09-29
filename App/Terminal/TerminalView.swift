@@ -1,5 +1,5 @@
 import AppKit
-import GaterTerminal
+import G8rTerminal
 
 /// Draws one TerminalSession with CoreText and forwards keyboard, paste,
 /// scroll, focus, and resize events to it.

@@ -1,22 +1,21 @@
 import AppKit
-import GaterCore
+import G8rCore
 
-/// The one Gater window (spec §4.1 item 6):
+/// The one G8r window:
 ///
 ///     ┌─────────────────────┬────────────────┬──────────────┐
-///     │ [orchestrator][sh1] │ delegate: auth │ Tree|Web|Ev  │
-///     │                     │  (terminal)    │ ┌ Auth ────┐ │
-///     │  orchestrator       ├────────────────┤ │ d-001 …  │ │
-///     │  terminal           │ delegate: dash │ └──────────┘ │
+///     │ [orchestrator][sh1] │ delegate: auth │ Events       │
+///     │                     │  (terminal)    │ 15:02 edit … │
+///     │  orchestrator       ├────────────────┤ 15:02 stop … │
+///     │  terminal           │ delegate: dash │              │
 ///     └─────────────────────┴────────────────┴──────────────┘
 ///
 /// Orchestrator and shells are tabs; each delegate is a tile in the middle
-/// column (hidden until the first delegate opens); the map has its own
-/// column on the right.
+/// column (hidden until the first delegate opens); the right column shows
+/// what the sessions are doing, and is where the map will go.
 final class MainWindowController: NSWindowController, NSTabViewDelegate {
     let paneManager: PaneManager
     let eventFeed = EventFeedView(frame: NSRect(x: 0, y: 0, width: 360, height: 700))
-    lazy var map = MapView(eventFeed: eventFeed)
     private let tabView = NSTabView()
     private let rootSplit = NSSplitView()
     private let sideSplit = NSSplitView()
@@ -27,7 +26,7 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
     /// The pane whose terminal last had keyboard focus.
     private(set) var focusedPaneId: String?
 
-    private static let mapWidth: CGFloat = 360
+    private static let feedWidth: CGFloat = 360
 
     init(paneManager: PaneManager) {
         self.paneManager = paneManager
@@ -35,8 +34,8 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 860),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
-        window.title = "Gater — \((paneManager.repoRoot as NSString).lastPathComponent)"
-        window.setFrameAutosaveName("GaterMainWindow")
+        window.title = "G8r — \((paneManager.repoRoot as NSString).lastPathComponent)"
+        window.setFrameAutosaveName("G8rMainWindow")
         window.minSize = NSSize(width: 700, height: 400)
         super.init(window: window)
 
@@ -47,29 +46,29 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         // size on first layout, so seed real frames before adding them —
         // a zero-width pane otherwise loses the whole window to its sibling.
         let content = window.contentRect(forFrameRect: window.frame).size
-        let mapWidth = min(Self.mapWidth, content.width / 3)
+        let feedWidth = min(Self.feedWidth, content.width / 3)
         rootSplit.frame = NSRect(origin: .zero, size: content)
         rootSplit.isVertical = true
         rootSplit.dividerStyle = .thin
-        tabView.frame = NSRect(x: 0, y: 0, width: content.width - mapWidth - 1, height: content.height)
+        tabView.frame = NSRect(x: 0, y: 0, width: content.width - feedWidth - 1, height: content.height)
         sideSplit.frame = NSRect(x: 0, y: 0, width: 0, height: content.height)
         sideSplit.isVertical = false
         sideSplit.dividerStyle = .thin
         sideSplit.isHidden = true // until the first delegate opens
         columnFiller.frame = NSRect(x: 0, y: 0, width: 0, height: 0)
         sideSplit.addArrangedSubview(columnFiller)
-        map.frame = NSRect(x: content.width - mapWidth, y: 0, width: mapWidth, height: content.height)
+        eventFeed.frame = NSRect(x: content.width - feedWidth, y: 0, width: feedWidth, height: content.height)
 
         rootSplit.addArrangedSubview(tabView)
         rootSplit.addArrangedSubview(sideSplit)
-        rootSplit.addArrangedSubview(map)
-        // Window resizes go to the terminals; the map keeps its width.
+        rootSplit.addArrangedSubview(eventFeed)
+        // Window resizes go to the terminals; the feed keeps its width.
         rootSplit.setHoldingPriority(NSLayoutConstraint.Priority(250), forSubviewAt: 0)
         rootSplit.setHoldingPriority(NSLayoutConstraint.Priority(260), forSubviewAt: 1)
         rootSplit.setHoldingPriority(NSLayoutConstraint.Priority(270), forSubviewAt: 2)
         NSLayoutConstraint.activate([
             tabView.widthAnchor.constraint(greaterThanOrEqualToConstant: 360),
-            map.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
+            eventFeed.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
         ])
         window.contentView = rootSplit
         window.center()
@@ -134,20 +133,20 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         tiles[pane.id] = tile
 
         // Seed a sensible frame (see the NSSplitView note in init), then
-        // insert above the event feed.
+        // insert above the filler.
         tile.frame = NSRect(x: 0, y: 0, width: sideSplit.bounds.width, height: sideSplit.bounds.height / 2)
         sideSplit.insertArrangedSubview(tile, at: tiles.count - 1) // above the filler
 
         if widenColumn {
             // A delegate runs a full claude session; give its column room
-            // between the orchestrator and the map.
+            // between the orchestrator and the feed.
             sideSplit.isHidden = false
             rootSplit.layoutSubtreeIfNeeded()
             let total = rootSplit.bounds.width
-            let mapWidth = min(max(map.frame.width, 240), total / 3)
-            let tilesWidth = max((total - mapWidth) * 0.45, 360)
-            rootSplit.setPosition(total - mapWidth - tilesWidth, ofDividerAt: 0)
-            rootSplit.setPosition(total - mapWidth, ofDividerAt: 1)
+            let feedWidth = min(max(eventFeed.frame.width, 240), total / 3)
+            let tilesWidth = max((total - feedWidth) * 0.45, 360)
+            rootSplit.setPosition(total - feedWidth - tilesWidth, ofDividerAt: 0)
+            rootSplit.setPosition(total - feedWidth, ofDividerAt: 1)
         }
         layoutSideColumn()
         window?.makeFirstResponder(pane.view)
@@ -195,7 +194,7 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
             sideSplit.layoutSubtreeIfNeeded()
             y += divider
         }
-        if ProcessInfo.processInfo.environment["GATER_DEBUG_LAYOUT"] != nil {
+        if ProcessInfo.processInfo.environment["G8R_DEBUG_LAYOUT"] != nil {
             for view in sideSplit.arrangedSubviews {
                 FileHandle.standardError.write("LAYOUT \(type(of: view)) \(view.frame) min=\(view.fittingSize.height)\n".data(using: .utf8)!)
             }
