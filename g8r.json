@@ -2,5 +2,6 @@
   "plans": ["PLAN.md"],
   "build_command": "swift build",
   "test_command": "swift test",
+  "worktree_setup": "ln -sfn \"$G8R_PLAN_ROOT/Vendor/ghostty/GhosttyVT.xcframework\" Vendor/ghostty/GhosttyVT.xcframework",
   "ignore": ["Vendor/**", "planmap/**"]
 }

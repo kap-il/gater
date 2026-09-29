@@ -5,7 +5,7 @@ DerivedData/
 xcuserdata/
 .DS_Store
 Vendor/ghostty/build/
-Vendor/ghostty/GhosttyVT.xcframework/
+Vendor/ghostty/GhosttyVT.xcframework
 .g8r/
 .gstack/
 .internal/

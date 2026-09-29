@@ -109,6 +109,7 @@ overrides it key by key, and environment variables override both.
   "plans": ["PLAN.md"],
   "build_command": "swift build",
   "test_command": "swift test",
+  "worktree_setup": "ln -sfn \"$G8R_PLAN_ROOT/Vendor/x.xcframework\" Vendor/x.xcframework",
   "ignore": ["Vendor/**", "planmap/**"]
 }
 ```
@@ -118,6 +119,7 @@ overrides it key by key, and environment variables override both.
 | `plans` | `PLAN.md`, then `plans/*.md`, then `docs/plans/*.md`, whichever exist | |
 | `build_command` | none | `G8R_BUILD_COMMAND` |
 | `test_command` | none | `G8R_TEST_COMMAND` |
+| `worktree_setup` | none; run in each new worktree, with `G8R_PLAN_ROOT` set, to put back what git doesn't carry, such as build output | |
 | `ignore` | none; globs of paths the map leaves out | |
 
 ### The map
@@ -425,6 +427,7 @@ public struct G8rConfig: Equatable {
     public var plans: [String]
     public var buildCommand: String?
     public var testCommand: String?
+    public var worktreeSetup: String?
     public var ignore: [String]
     public static func load(repoRoot: String,
                             environment: [String: String] = ProcessInfo.processInfo.environment) -> G8rConfig
@@ -746,8 +749,9 @@ Building a node starts a session that belongs to that node and ends with it.
 
 **Start.** The node must be planned and have nothing in `blockedBy`. g8r
 creates `../<repo>-<id>` on `g8r/<id>`, branching from `g8r/integration`
-when it exists and from the plan root's `HEAD` otherwise. It trusts the
-worktree if the setting is on, installs the hooks, and opens a pane running
+when it exists and from the plan root's `HEAD` otherwise. It runs
+`worktree_setup` there, trusts the worktree if the setting is on, installs
+the hooks, and opens a pane running
 `claude --name build-<id>` with the prompt as its first message. The pane's
 environment carries `G8R_PANE_ID=build-<id>` and `G8R_COMPONENT=<id>`.
 
