@@ -37,12 +37,21 @@ public final class ReferenceEngine {
         for worktree in Array(servers.keys) { stop(worktree: worktree) }
     }
 
+    /// The file extensions the TypeScript server reads. The symbol engine
+    /// reads other languages too, and a symbol in one of those has no
+    /// server to ask.
+    private static let served = SymbolLanguage.typescript.extensions
+        .union(SymbolLanguage.tsx.extensions)
+        .union(SymbolLanguage.javascript.extensions)
+
     /// References to `symbolId` (`path#Qualified.name`) in `worktree`'s own
     /// copy of the code, excluding the declaration. nil when that copy has
-    /// no such symbol or no TypeScript 7 compiler is available.
+    /// no such symbol, the file is not one the TypeScript server reads, or
+    /// no TypeScript 7 compiler is available.
     public func references(to symbolId: String, in worktree: String) throws -> [ReferenceSite]? {
         guard let hash = symbolId.lastIndex(of: "#") else { return nil }
         let path = String(symbolId[..<hash])
+        guard Self.served.contains((path as NSString).pathExtension.lowercased()) else { return nil }
         let absolute = (worktree as NSString).appendingPathComponent(path)
         guard let source = try? String(contentsOfFile: absolute, encoding: .utf8),
               let symbol = try SymbolExtractor.symbols(source: source, path: path).first(where: { $0.id == symbolId }),
