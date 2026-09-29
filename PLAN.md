@@ -209,6 +209,21 @@ The standard list lives in one place, `Sources/G8rSymbols/StandardMap.swift`.
 A component that adds a stage does **not** edit that file. The orchestrator
 adds the stage to the list when the component is merged.
 
+### Running commands
+
+Every component starts programs through a `CommandRunner`, so a test can
+swap in a stub and never start a process.
+
+```swift
+// Sources/G8rCore/Config/ProcessRunner.swift
+public enum ProcessRunner {
+    /// Runs in `directory` through a login shell, so programs on the user's
+    /// PATH are found even when the app was opened from Finder. Output and
+    /// errors come back as one string.
+    public static func runner(in directory: String, timeout: TimeInterval = 600) -> CommandRunner
+}
+```
+
 ### Events
 
 New kinds in `.g8r/events.jsonl`, beside `pane_opened`, `pane_closed`,
@@ -504,7 +519,9 @@ use which, which tests cover them, and what can be built next.
 **Files.** The files are everything git tracks or would track in the code
 root (`git ls-files -co --exclude-standard`), minus the `ignore` globs. A
 file belongs to the component whose `Code:` entry matches it; the longest
-match wins. Code no entry matches is grouped by directory into nodes with
+match wins. An entry ending in `/` names a directory and matches everything
+under it. `Glob.matches` doesn't read it that way today, so codemap fixes
+`Glob`. Code no entry matches is grouped by directory into nodes with
 the id `unplanned:<directory>`. Files that aren't code and match nothing are
 left off the map.
 
@@ -559,26 +576,39 @@ public enum LivingMapBuilder {
 // Sources/G8rSymbols/StandardMap.swift
 public enum StandardMap {
     public static var stages: [MapStage] { [] }
-    public static func build(planRoot: String, codeRoot: String? = nil) throws -> LivingMap
+    public static func build(planRoot: String, codeRoot: String? = nil,
+                             extract: Bool = false) throws -> LivingMap
 }
 ```
 
 `StandardMap.build` picks the code root: the integration worktree when it
 exists, the plan root otherwise.
 
+Asking a model is slow and costs money, so it only happens when `extract`
+is true. Otherwise a free-form doc is read from the cache, and a doc that
+isn't cached is reported in `problems`. The app passes true when a plan doc
+changes on disk or the user asks, never on a routine redraw.
+
+The plan graph is taken as it comes: a need or change that names no
+component makes no edge, and a cycle in needs gives its members no wave
+instead of looping.
+
 The `g8r-map` executable prints the map for a repo as JSON:
 `swift run g8r-map [repo]`.
 
 - Needs: plandoc, symbols, swiftsymbols, globs, worktrees
-- Code: `Sources/G8rCore/CodeMap/`, `Sources/G8rSymbols/TreeSitterScanner.swift`,
+- Changes: globs
+- Code: `Sources/G8rCore/CodeMap/`, `Sources/G8rCore/Config/ProcessRunner.swift`,
+  `Sources/G8rSymbols/TreeSitterScanner.swift`,
   `Sources/G8rSymbols/StandardMap.swift`, `Sources/g8r-map/`
 - Done when: on a fixture repo, the longest `Code:` match wins, globs match,
   ignored paths are absent and leftover code is grouped by directory. A name
   declared by two components makes no edge. Test attribution follows the
   three rules in order. Waves, `blockedBy` and `blast` are right for a plan
-  three levels deep. On this repo `swift run g8r-map` prints valid JSON in
-  which every tracked source file appears in exactly one node, and no node
-  under Built is `planned`.
+  three levels deep. A cycle in the plan ends with no wave for its members.
+  `Glob.matches("a/b/", "a/b/c.swift")` is true. On this repo
+  `swift run g8r-map` prints valid JSON in which every tracked source file
+  appears in exactly one node, and no node under Built is `planned`.
 
 ### drift: Drift edges
 
