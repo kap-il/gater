@@ -14,6 +14,11 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/ChimeHQ/SwiftTreeSitter", exact: "0.9.0"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-typescript", exact: "0.23.2"),
+        // The grammar's main branch has no generated parser. This is the
+        // tag 0.7.3-with-generated-files, which isn't a version SwiftPM can
+        // resolve, so it is pinned by revision.
+        .package(url: "https://github.com/alex-pinkus/tree-sitter-swift",
+                 revision: "31d17fe7e818a2048c808b5c6fdc2dc792f4f5b5"),
     ],
     targets: [
         .target(
@@ -38,6 +43,7 @@ let package = Package(
                 "G8rCore",
                 .product(name: "SwiftTreeSitter", package: "SwiftTreeSitter"),
                 .product(name: "TreeSitterTypeScript", package: "tree-sitter-typescript"),
+                .product(name: "TreeSitterSwift", package: "tree-sitter-swift"),
             ],
             path: "Sources/G8rSymbols"
         ),

@@ -124,3 +124,29 @@ final class ReferenceEngineTests: XCTestCase {
         XCTAssertNil(try engine.references(to: "src/users.ts#getUser", in: repo))
     }
 }
+
+/// What the engine does before any server is involved, so these run
+/// without TypeScript installed.
+final class ReferenceEngineLanguageTests: XCTestCase {
+    /// The symbol engine reads Swift and the TypeScript server doesn't: a
+    /// Swift symbol gets no answer, and no server is started to find that
+    /// out.
+    func testSymbolInAFileTheServerDoesNotReadHasNoAnswer() throws {
+        let worktree = FileManager.default.temporaryDirectory.appendingPathComponent("g8r-refs-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: worktree.appendingPathComponent("Sources"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: worktree) }
+        let source = "public struct Bus { public func start() {} }\n"
+        try source.write(to: worktree.appendingPathComponent("Sources/Bus.swift"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(try SymbolExtractor.symbols(source: source, path: "Sources/Bus.swift").map(\.id),
+                       ["Sources/Bus.swift#Bus", "Sources/Bus.swift#Bus.start"], "the symbol is there to be found")
+
+        var askedForCompiler = false
+        let engine = ReferenceEngine(locateCompiler: { _ in
+            askedForCompiler = true
+            return nil
+        })
+        XCTAssertNil(try engine.references(to: "Sources/Bus.swift#Bus.start", in: worktree.path))
+        XCTAssertFalse(askedForCompiler)
+        XCTAssertEqual(engine.runningWorktrees, [])
+    }
+}

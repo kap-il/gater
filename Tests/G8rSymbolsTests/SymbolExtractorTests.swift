@@ -111,4 +111,42 @@ final class SymbolDescribeTests: XCTestCase {
         XCTAssertTrue(d.code.hasPrefix("function getUser("))
         XCTAssertNil(SymbolExtractor.describe(symbolId: "src/users.ts#nope", source: source, path: "src/users.ts"))
     }
+
+    /// What `describe` says of one symbol, said of all of them from one
+    /// parse.
+    func testDescribeAllGivesEverySymbolItsOneLineSignature() throws {
+        let typescript = try SymbolExtractor.describeAll(source: """
+        export const LIMIT: number = 5
+        export class UserService {
+          getUser(
+            id: string
+          ): User { return this.store.get(id) }
+        }
+        """, path: "src/users.ts")
+        XCTAssertEqual(typescript.map(\.symbol.qualifiedName), ["LIMIT", "UserService", "UserService.getUser"])
+        XCTAssertEqual(typescript.map(\.signature), ["const LIMIT: number", "class UserService", "getUser( id: string ): User"])
+        XCTAssertEqual(typescript.last?.code, "getUser(\n    id: string\n  ): User { return this.store.get(id) }")
+
+        let swift = try SymbolExtractor.describeAll(source: """
+        public struct Bus {
+            public func start(
+                on queue: Queue
+            ) throws -> Bool { true }
+        }
+        """, path: "Sources/Bus.swift")
+        XCTAssertEqual(swift.map(\.symbol.qualifiedName), ["Bus", "Bus.start"])
+        XCTAssertEqual(swift.map(\.signature), ["public struct Bus", "public func start( on queue: Queue ) throws -> Bool"])
+    }
+
+    func testDescribeAllAgreesWithSymbolsAndDescribe() throws {
+        let source = "export function parse(x: string): number;\nexport function parse(x: any): number { return Number(x) }\nconst n = 1\n"
+        let all = try SymbolExtractor.describeAll(source: source, path: "p.ts")
+        XCTAssertEqual(all.map(\.symbol), try SymbolExtractor.symbols(source: source, path: "p.ts"))
+        for described in all {
+            let one = try XCTUnwrap(SymbolExtractor.describe(symbolId: described.symbol.id, source: source, path: "p.ts"))
+            XCTAssertEqual(one.signature, described.signature)
+            XCTAssertEqual(one.code, described.code)
+        }
+        XCTAssertThrowsError(try SymbolExtractor.describeAll(source: "x", path: "a.py"))
+    }
 }
