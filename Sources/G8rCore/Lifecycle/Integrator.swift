@@ -114,17 +114,3 @@ public struct Integrator {
         return canonical(a) == canonical(b)
     }
 }
-
-/// Per-repo settings in `<repo>/.g8r/config.json` (e.g.
-/// `{"test_command": "npm test"}`); G8R_TEST_COMMAND overrides.
-public struct G8rConfig: Equatable {
-    public var testCommand: String?
-
-    public static func load(repoRoot: String,
-                            environment: [String: String] = ProcessInfo.processInfo.environment) -> G8rConfig {
-        let path = URL(fileURLWithPath: repoRoot).appendingPathComponent(".g8r/config.json")
-        let json = (try? Data(contentsOf: path)).flatMap { try? JSONDecoder().decode(JSONValue.self, from: $0) }
-        let fromFile = json?.value(atPath: "test_command")?.stringValue
-        return G8rConfig(testCommand: environment["G8R_TEST_COMMAND"] ?? fromFile)
-    }
-}
