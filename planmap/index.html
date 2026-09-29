@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>G8r living map</title>
+<style>
+  :root {
+    --bg: #f6f6f3; --surface: #ffffff; --ink: #1b1b19; --muted: #6d6d67; --line: #dcdcd6;
+    --soft: #efefeb; --code: #f1f1ed;
+    --proven: #2f9e62; --unproven: #8a8f98; --unplanned: #d9772b; --planned: #3b7cf0;
+    --blocked: #9aa9c4; --failing: #d64545;
+    --confirmed: #a3a39c; --undeclared: #e0672f; --unrealized: #7d8cab;
+    --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 14px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --surface: #1d1d1b; --ink: #ecece6; --muted: #9a9a92; --line: #33332f;
+      --soft: #262623; --code: #252522;
+      --proven: #46b97a; --unproven: #8e939c; --unplanned: #ee9144; --planned: #6a9cf7;
+      --blocked: #66758f; --failing: #ef6a6a;
+      --confirmed: #5f5f59; --undeclared: #f08048; --unrealized: #8896b5;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr) 410px;
+    height: 100vh; overflow: hidden;
+  }
+  code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+
+  header {
+    grid-column: 1 / -1; display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 10px 18px; border-bottom: 1px solid var(--line); background: var(--surface);
+  }
+  header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  .legend { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    font-size: 12px; cursor: pointer; user-select: none;
+  }
+  .chip.off { opacity: .4; }
+  .chip i { width: 16px; height: 0; border-top: 2px solid; display: inline-block; }
+  .chip i.dash { border-top-style: dashed; }
+  .chip i.dot { border-top-style: dotted; }
+
+  #stage { position: relative; overflow: auto; padding: 14px 18px 0; }
+  #chart { display: block; margin: 0 auto; }
+  #time {
+    position: sticky; bottom: 0; display: flex; align-items: center; gap: 12px;
+    padding: 10px 4px 12px; background: linear-gradient(transparent, var(--bg) 35%);
+  }
+  #time button {
+    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    border-radius: 7px; padding: 4px 10px; cursor: pointer; font-size: 12px;
+  }
+  #time input { flex: 1; accent-color: var(--planned); }
+  #time .label { width: 330px; font-size: 12px; color: var(--muted); white-space: nowrap;
+                 overflow: hidden; text-overflow: ellipsis; }
+  #time .label b { color: var(--ink); font-weight: 600; }
+
+  aside {
+    border-left: 1px solid var(--line); background: var(--surface); overflow-y: auto;
+    padding: 18px 20px 40px;
+  }
+  aside h2 { font-size: 18px; margin: 0 0 2px; letter-spacing: -.01em; }
+  aside h3 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+    margin: 22px 0 8px; font-weight: 600;
+  }
+  aside p { margin: 6px 0; }
+  .pill {
+    display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
+    font-weight: 600; color: #fff; vertical-align: 2px; margin-left: 6px;
+  }
+  .muted { color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 14px 0 4px; }
+  .stat { background: var(--soft); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-size: 17px; font-weight: 650; }
+  .stat span { font-size: 11px; color: var(--muted); }
+  .row {
+    display: flex; align-items: baseline; gap: 8px; padding: 5px 8px; margin: 0 -8px;
+    border-radius: 6px; cursor: pointer;
+  }
+  .row:hover { background: var(--soft); }
+  .row .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; transform: translateY(-1px); }
+  .row .who { white-space: nowrap; }
+  .row .why { color: var(--muted); font-size: 12px; margin-left: auto; text-align: right; min-width: 0; }
+  .row .why.mono { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+  .tag { font-size: 11px; padding: 0 6px; border-radius: 4px; border: 1px solid; white-space: nowrap; }
+  .file { padding: 6px 0; border-top: 1px solid var(--line); }
+  .file:first-of-type { border-top: 0; }
+  .file .path { cursor: pointer; word-break: break-all; }
+  .file .path:hover { text-decoration: underline; }
+  .syms { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .sym { background: var(--code); border-radius: 4px; padding: 0 6px; font-size: 11px; }
+  .sym em { color: var(--muted); font-style: normal; }
+  pre {
+    background: var(--code); border-radius: 8px; padding: 10px 12px; margin: 6px 0;
+    white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow: auto;
+  }
+  .doc { white-space: pre-wrap; font-size: 13px; color: var(--ink); border-left: 2px solid var(--line);
+         padding-left: 12px; max-height: 260px; overflow: auto; }
+  button.primary {
+    border: 0; background: var(--planned); color: #fff; border-radius: 8px; padding: 7px 14px;
+    font-weight: 600; font-size: 13px; cursor: pointer;
+  }
+  button.primary[disabled] { background: var(--blocked); cursor: not-allowed; }
+  button.ghost {
+    border: 1px solid var(--line); background: transparent; color: var(--ink); border-radius: 8px;
+    padding: 6px 12px; font-size: 12px; cursor: pointer;
+  }
+
+  /* chart */
+  .node { cursor: pointer; transition: opacity .18s; }
+  .node rect.box { fill: var(--surface); stroke: var(--line); stroke-width: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.08)); }
+  .node rect.bar { stroke: none; }
+  .node text.name { font-size: 12.5px; font-weight: 620; fill: var(--ink); }
+  .node text.meta { font-size: 10.5px; fill: var(--muted); }
+  .node.planned rect.box { fill: var(--bg); stroke-dasharray: 5 4; stroke: var(--planned); filter: none; }
+  .node.planned.blocked rect.box { stroke: var(--blocked); }
+  .node.unplanned rect.box { stroke: var(--unplanned); stroke-dasharray: 2 3; }
+  .node.selected rect.box { stroke: var(--ink); stroke-width: 2; stroke-dasharray: none; }
+  .node.blast rect.box { stroke: var(--failing); stroke-width: 2; stroke-dasharray: none; }
+  .node.dim, .edge.dim { opacity: .13; }
+  .node.gone, .edge.gone { opacity: 0; visibility: hidden; pointer-events: none; }
+  .edge { transition: opacity .18s; }
+  .edge path.line { fill: none; stroke-width: 1.4; opacity: .55; }
+  .edge path.hit { fill: none; stroke: transparent; stroke-width: 12; }
+  .edge.hot path.line { stroke-width: 2.2; opacity: 1; }
+  .edge.confirmed path.line { stroke: var(--confirmed); }
+  .edge.undeclared path.line { stroke: var(--undeclared); }
+  .edge.unrealized path.line { stroke: var(--unrealized); stroke-dasharray: 6 4; }
+  .edge.planned path.line { stroke: var(--planned); stroke-dasharray: 2 4; }
+  .layer-label { font-size: 10px; fill: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  #tip {
+    position: fixed; pointer-events: none; background: var(--ink); color: var(--bg);
+    padding: 6px 9px; border-radius: 7px; font-size: 12px; max-width: 320px; display: none; z-index: 5;
+  }
+  @media (max-width: 900px) {
+    body { grid-template-columns: 1fr; grid-template-rows: auto 60vh auto; height: auto; overflow: auto; }
+    aside { border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1 id="title">Living map</h1>
+    <div class="sub" id="subtitle"></div>
+  </div>
+  <div class="legend" id="legend"></div>
+</header>
+
+<main id="stage">
+  <svg id="chart" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div id="time">
+    <button id="play" title="Replay the build">▶ Replay</button>
+    <input id="scrub" type="range" min="0" step="1">
+    <div class="label" id="when"></div>
+  </div>
+</main>
+
+<aside id="panel"></aside>
+<div id="tip"></div>
+
+<script src="map.js"></script>
+<script>
+(() => {
+  const M = window.PLANMAP;
+  const $ = (id) => document.getElementById(id);
+  const byId = new Map(M.nodes.map((n) => [n.id, n]));
+  const NOW = M.timeline.length;            // slider position meaning "today, plans included"
+  const state = {
+    selected: null, hover: null, t: NOW,
+    kinds: { confirmed: true, undeclared: true, unrealized: true, planned: true },
+    every: false,   // also draw edges the plan already implies by a longer route
+  };
+
+  const STATUS = {
+    proven: ["built, tests pass", "--proven"],
+    unproven: ["built, no tests", "--unproven"],
+    failing: ["built, tests fail", "--failing"],
+    unplanned: ["not in any plan", "--unplanned"],
+    planned: ["planned", "--planned"],
+  };
+  const KIND = {
+    confirmed: ["in plan and code", "", "--confirmed"],
+    undeclared: ["in code, not in plan", "", "--undeclared"],
+    unrealized: ["in plan, not in code", "dash", "--unrealized"],
+    planned: ["planned", "dot", "--planned"],
+  };
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const css = (v) => `var(${v})`;
+  const look = (e) => (e.kind === "indirect" ? "confirmed" : e.kind);
+  const quiet = (e) => e.implied || e.kind === "indirect";
+  const colorOf = (n) => css(n.status === "planned" && n.blockedBy.length ? "--blocked" : STATUS[n.status][1]);
+  const short = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+  // Plan docs are hard-wrapped; join a paragraph's lines, leave code blocks alone.
+  const unwrap = (text) => text.split("```").map((part, i) =>
+    i % 2 ? part : part.replace(/([^\n])\n(?![\n\-|#>*`]|\d+\. )/g, "$1 ")).join("```");
+  const nth = (n) => (n == null ? "cycle" : n + (["th", "st", "nd", "rd"][n % 100 > 10 && n % 100 < 14 ? 0 : n % 10] || "th"));
+  // In the app, clicks go to Swift through this bridge; in a browser they fall back.
+  const bridge = (type, payload) => {
+    const h = window.webkit?.messageHandlers?.g8r;
+    if (h) h.postMessage({ type, ...payload });
+    return Boolean(h);
+  };
+
+  // ---------------------------------------------------------------- layout
+  // Rows follow the plan: a component sits below everything it needs. Code no
+  // plan mentions has no declared needs, so it is placed by what it uses.
+  const W = 158, H = 50, GX = 22, GY = 58, PAD = 26;
+  const layoutEdges = M.edges.filter((e) => e.declared || byId.get(e.from).status === "unplanned");
+  const needs = new Map(M.nodes.map((n) => [n.id, []]));
+  const neededBy = new Map(M.nodes.map((n) => [n.id, []]));
+  for (const e of layoutEdges) { needs.get(e.from).push(e.to); neededBy.get(e.to).push(e.from); }
+
+  const layer = new Map();
+  const visiting = new Set();
+  const layerOf = (id) => {
+    if (layer.has(id)) return layer.get(id);
+    if (visiting.has(id)) return 0;                     // a cycle in the plan
+    visiting.add(id);
+    const l = needs.get(id).reduce((m, d) => Math.max(m, layerOf(d) + 1), 0);
+    visiting.delete(id);
+    layer.set(id, l);
+    return l;
+  };
+  M.nodes.forEach((n) => layerOf(n.id));
+
+  const rows = [];
+  M.nodes.forEach((n) => (rows[layer.get(n.id)] ??= []).push(n.id));
+  const widest = Math.max(...rows.map((r) => r.length));
+  const width = widest * W + (widest - 1) * GX + PAD * 2 + 70;
+  const height = rows.length * H + (rows.length - 1) * GY + PAD * 2;
+  const pos = new Map();
+  const place = () => rows.forEach((row, r) => row.forEach((id, i) => {
+    const span = row.length * W + (row.length - 1) * GX;
+    pos.set(id, { x: 70 + (width - 70 - span) / 2 + i * (W + GX), y: PAD + r * (H + GY) });
+  }));
+  place();
+  const centre = (ids) => ids.length ? ids.reduce((s, id) => s + pos.get(id).x, 0) / ids.length : null;
+  for (let pass = 0; pass < 6; pass++) {                 // fewer crossings
+    const down = pass % 2 === 0;
+    for (const row of down ? rows : [...rows].reverse()) {
+      const key = new Map(row.map((id) => [id, centre(down ? needs.get(id) : neededBy.get(id)) ?? pos.get(id).x]));
+      row.sort((a, b) => key.get(a) - key.get(b));
+    }
+    place();
+  }
+
+  // ------------------------------------------------------------------ draw
+  const svg = $("chart");
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag, attrs = {}, parent = svg) => {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    parent.appendChild(e);
+    return e;
+  };
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("width", width);
+  svg.style.maxWidth = "100%";
+  svg.style.height = "auto";
+
+  const defs = el("defs");
+  for (const [kind, [, , v]] of Object.entries(KIND)) {
+    const m = el("marker", { id: "arrow-" + kind, viewBox: "0 0 10 10", refX: 8.5, refY: 5,
+                             markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs);
+    el("path", { d: "M0,0 L10,5 L0,10 z", style: `fill:${css(v)}` }, m);
+  }
+  rows.forEach((_, r) => el("text", { class: "layer-label", x: 4, y: PAD + r * (H + GY) + H / 2 + 3 })
+    .textContent = r === 0 ? "needs nothing" : "level " + r);
+
+  // An arrow runs from what is needed to what needs it: the order to build in.
+  const pathFor = (e) => {
+    const a = pos.get(e.to), b = pos.get(e.from);
+    if (b.y > a.y) {
+      const x1 = a.x + W / 2, y1 = a.y + H, x2 = b.x + W / 2, y2 = b.y - 3;
+      const k = Math.max(26, (y2 - y1) * 0.45);
+      return `M${x1},${y1} C${x1},${y1 + k} ${x2},${y2 - k} ${x2},${y2}`;
+    }
+    if (b.y < a.y) {
+      const x1 = a.x + W / 2 + 14, y1 = a.y, x2 = b.x + W / 2 + 14, y2 = b.y + H + 3;
+      const k = Math.max(26, (y1 - y2) * 0.45);
+      return `M${x1},${y1} C${x1 + 40},${y1 - k} ${x2 + 40},${y2 + k} ${x2},${y2}`;
+    }
+    const left = a.x < b.x, x1 = a.x + (left ? W : 0), x2 = b.x + (left ? -3 : W + 3), y = a.y + H / 2;
+    return `M${x1},${y} C${x1 + (left ? 14 : -14)},${y - 26} ${x2 + (left ? -14 : 14)},${y - 26} ${x2},${y}`;
+  };
+
+  const edgeLayer = el("g"), nodeLayer = el("g");
+  const edgeEls = M.edges.map((e) => {
+    const g = el("g", { class: "edge " + look(e) }, edgeLayer);
+    el("path", { class: "line", d: pathFor(e), "marker-end": `url(#arrow-${look(e)})` }, g);
+    el("path", { class: "hit", d: pathFor(e) }, g);
+    g.addEventListener("mousemove", (ev) => tip(ev, edgeTip(e)));
+    g.addEventListener("mouseleave", () => tip());
+    g.addEventListener("click", (ev) => { ev.stopPropagation(); select(e.from); });
+    return [e, g];
+  });
+  const nodeEls = M.nodes.map((n) => {
+    const p = pos.get(n.id);
+    const blocked = n.status === "planned" && n.blockedBy.length;
+    const g = el("g", { class: `node ${n.status}${blocked ? " blocked" : ""}`,
+                        transform: `translate(${p.x},${p.y})` }, nodeLayer);
+    el("rect", { class: "box", width: W, height: H, rx: 9 }, g);
+    el("rect", { class: "bar", x: 0, y: 9, width: 3.5, height: H - 18, rx: 2, style: `fill:${colorOf(n)}` }, g);
+    el("text", { class: "name", x: 13, y: 21 }, g).textContent = short(n.name, 22);
+    el("text", { class: "meta", x: 13, y: 38 }, g);
+    g.addEventListener("mouseenter", () => { state.hover = n.id; paint(); });
+    g.addEventListener("mouseleave", () => { state.hover = null; paint(); });
+    g.addEventListener("click", (ev) => { ev.stopPropagation(); select(n.id); });
+    return [n, g];
+  });
+  svg.addEventListener("click", () => select(null));
+
+  const locAt = (n) => (state.t >= NOW ? n.loc : M.timeline[state.t].loc[n.id] || 0);
+  const exists = (n) => (state.t >= NOW ? true : n.status !== "planned" && locAt(n) > 0);
+  const metaOf = (n) => {
+    if (n.status === "planned") return `build ${nth(n.wave)} · ${n.blockedBy.length ? "waiting" : "ready"}`;
+    const loc = locAt(n).toLocaleString() + " lines";
+    if (state.t < NOW) return loc;
+    if (n.status === "unplanned") return loc + " · no plan";
+    return loc + (n.tests ? ` · ${n.tests.passed} tests ✓` : " · no tests");
+  };
+
+  function paint() {
+    const focus = state.hover ?? state.selected;
+    const near = new Set([focus]);
+    if (focus) for (const e of M.edges) if (state.kinds[look(e)]) {
+      if (e.from === focus) near.add(e.to);
+      if (e.to === focus) near.add(e.from);
+    }
+    const sel = state.selected && byId.get(state.selected);
+    const blast = new Set(sel?.status === "planned" ? [...sel.changes, ...sel.blast] : []);
+    for (const [n, g] of nodeEls) {
+      g.classList.toggle("gone", !exists(n));
+      g.classList.toggle("dim", Boolean(focus) && !near.has(n.id) && !blast.has(n.id));
+      g.classList.toggle("selected", n.id === state.selected);
+      g.classList.toggle("blast", blast.has(n.id) && n.id !== state.hover);
+      g.querySelector(".meta").textContent = metaOf(n);
+    }
+    for (const [e, g] of edgeEls) {
+      const hot = focus && (e.from === focus || e.to === focus);
+      const shown = state.kinds[look(e)] && exists(byId.get(e.from)) && exists(byId.get(e.to)) &&
+                    (state.every || hot || !quiet(e));
+      g.classList.toggle("gone", !shown);
+      g.classList.toggle("hot", Boolean(hot));
+      g.classList.toggle("dim", Boolean(focus) && !hot);
+    }
+  }
+
+  // --------------------------------------------------------------- tooltip
+  function tip(ev, html) {
+    const t = $("tip");
+    if (!html) { t.style.display = "none"; return; }
+    t.innerHTML = html;
+    t.style.display = "block";
+    t.style.left = Math.min(ev.clientX + 14, innerWidth - 340) + "px";
+    t.style.top = ev.clientY + 14 + "px";
+  }
+  const edgeTip = (e) => {
+    const a = byId.get(e.from).name, b = byId.get(e.to).name;
+    const what = { confirmed: "The plan says so and the code does it.",
+                   indirect: "The code uses it directly. The plan only gets there through another component.",
+                   undeclared: "The code does this. No plan says it should.",
+                   unrealized: "The plan says so. The code never refers to it directly.",
+                   planned: "Planned, not built yet." }[e.kind];
+    const syms = e.symbols.length ? `<br><span class="mono">${esc(e.symbols.join(", "))}</span> · ${e.refs} uses` : "";
+    return `<b>${esc(a)}</b> needs <b>${esc(b)}</b><br>${what}${syms}`;
+  };
+
+  // ----------------------------------------------------------------- panel
+  const nodeRow = (id, why = "") => {
+    const n = byId.get(id);
+    return `<div class="row" data-go="${esc(id)}"><span class="dot" style="background:${colorOf(n)}"></span>` +
+           `<span class="who">${esc(n.name)}</span><span class="why">${why}</span></div>`;
+  };
+  const kindTag = (k) => {
+    const [text, , v] = k === "indirect" ? ["implied by the plan", "", "--confirmed"] : KIND[k];
+    return `<span class="tag" style="color:${css(v)};border-color:${css(v)}">${text}</span>`;
+  };
+  const when = (t) => new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+
+  function overview() {
+    const count = (s) => M.nodes.filter((n) => n.status === s).length;
+    const diff = (k) => M.edges.filter((e) => e.kind === k);
+    const waves = {};
+    M.nodes.filter((n) => n.status === "planned").forEach((n) => (waves[n.wave] ??= []).push(n));
+    const edgeRow = (e) => `<div class="row" data-go="${esc(e.from)}"><span>${esc(byId.get(e.from).name)} → ${esc(byId.get(e.to).name)}</span>` +
+      `<span class="why mono">${esc(short(e.symbols.join(", "), 30))}</span></div>`;
+    return `
+      <h2>${esc(M.repo)}</h2>
+      <p class="muted">A map of the code, organised by what the plans describe. Status, files and
+      edges are measured from the repo at <span class="mono">${esc(M.head)}</span>. Click any node.</p>
+      <div class="stats">
+        <div class="stat"><b>${count("proven")}</b><span>built and tested</span></div>
+        <div class="stat"><b>${count("unproven") + count("failing")}</b><span>built, unproven</span></div>
+        <div class="stat"><b>${count("unplanned")}</b><span>not in a plan</span></div>
+        <div class="stat"><b>${count("planned")}</b><span>planned</span></div>
+      </div>
+      <h3>Build next</h3>
+      ${Object.entries(waves).map(([w, ns]) => ns.map((n) =>
+        nodeRow(n.id, n.blockedBy.length ? nth(n.wave) + " · after " + n.blockedBy.map((b) => esc(byId.get(b).name)).join(", ")
+                                         : nth(n.wave) + " · ready")).join("")).join("") || '<p class="muted">Nothing planned.</p>'}
+      <h3>Code no plan mentions</h3>
+      ${M.nodes.filter((n) => n.status === "unplanned").map((n) => nodeRow(n.id, n.loc + " lines")).join("") || '<p class="muted">None.</p>'}
+      ${M.retired.length ? `<h3>Retired · ${M.retired.length}</h3>` + M.retired.map((r) =>
+        `<p><b>${esc(r.name)}</b> <span class="muted">${esc(r.plan)} ${esc(r.ref)}</span><br><span class="muted">${esc(r.why)}</span></p>`).join("") : ""}
+      <h3>In the code, not in the plan · ${diff("undeclared").length}</h3>
+      ${diff("undeclared").map(edgeRow).join("")}
+      <h3>In the plan, not in the code · ${diff("unrealized").length}</h3>
+      ${diff("unrealized").map(edgeRow).join("")}
+      <p class="muted" style="margin-top:18px">Edges are measured from type names, so two components
+      that only talk through events in the log show up as "in the plan, not in the code".</p>`;
+  }
+
+  function detail(n) {
+    const out = M.edges.filter((e) => e.from === n.id), inc = M.edges.filter((e) => e.to === n.id);
+    const [label] = STATUS[n.status];
+    const planned = n.status === "planned";
+    const ready = planned && !n.blockedBy.length;
+    const t = n.tests;
+    const edgeList = (es, side) => es.map((e) => nodeRow(e[side], kindTag(e.kind))).join("") || '<p class="muted">Nothing.</p>';
+    return `
+      <h2>${esc(n.name)}<span class="pill" style="background:${colorOf(n)}">${planned ? (ready ? "ready to build" : "waiting") : label}</span></h2>
+      <div class="muted">${n.plan ? esc(M.plans.find((p) => p.id === n.plan).title) + " · " + esc(n.ref) : "No plan mentions this code"}</div>
+      <p>${esc(n.summary)}</p>
+      ${planned ? `
+        <p>${ready ? "Everything it needs is built." : "Waiting on " + n.blockedBy.map((b) => esc(byId.get(b).name)).join(", ") + "."}
+           Built ${nth(n.wave)} in this plan.</p>
+        ${n.changes.length ? `<p>Changes <b>${n.changes.map((c) => esc(byId.get(c).name)).join(", ")}</b>` +
+          (n.blast.length ? `, which ${n.blast.map((c) => esc(byId.get(c).name)).join(", ")} use${n.blast.length === 1 ? "s" : ""}. Outlined in red.` : ".") + "</p>" : ""}
+        <p><button class="primary" id="build" ${ready ? "" : "disabled"}>Build this</button>
+           <button class="ghost" id="showprompt">Show the prompt</button></p>
+        <div id="promptbox" hidden>
+          <pre id="prompt">${esc(n.prompt)}</pre>
+          <p><button class="ghost" id="copy">Copy prompt</button> <span class="mono muted">${esc(n.command)}</span></p>
+        </div>` : `
+        <div class="stats">
+          <div class="stat"><b>${n.files.length}</b><span>files</span></div>
+          <div class="stat"><b>${n.loc.toLocaleString()}</b><span>lines</span></div>
+          <div class="stat"><b>${t ? t.passed + "/" + t.count : "0"}</b><span>tests pass</span></div>
+          <div class="stat"><b>${n.git.commits}</b><span>commits</span></div>
+        </div>
+        ${n.git.first ? `<p class="muted">First built ${when(n.git.first.t)}: “${esc(n.git.first.subject)}”</p>` : ""}`}
+      <h3>Needs</h3>${edgeList(out, "to")}
+      <h3>Needed by</h3>${edgeList(inc, "from")}
+      ${n.section ? `<h3>Plan · <span class="mono" style="text-transform:none">${esc(n.section.doc)}:${n.section.line}</span></h3>
+        <div class="doc">${esc(unwrap(n.section.text))}</div>` : ""}
+      ${planned ? `<h3>Where it will live</h3>${n.paths.map((p) => `<div class="mono">${esc(p)}</div>`).join("")}` : `
+        <h3>Files</h3>
+        ${n.files.map((f) => `<div class="file"><div class="path mono" data-file="${esc(f.path)}">${esc(f.path)}
+          <span class="muted">${f.loc ? f.loc + " lines" : ""}</span></div>
+          ${f.symbols.length ? `<div class="syms">${f.symbols.map((s) => `<span class="sym mono"><em>${esc(s.kind)}</em> ${esc(s.name)}</span>`).join("")}</div>` : ""}</div>`).join("")}
+        ${t ? `<h3>Tests</h3>${t.files.map((f) => `<div class="mono">${esc(f)}</div>`).join("")}` : ""}`}`;
+  }
+
+  function render() {
+    const n = state.selected && byId.get(state.selected);
+    const panel = $("panel");
+    panel.innerHTML = n ? detail(n) : overview();
+    panel.scrollTop = 0;
+    panel.querySelectorAll("[data-go]").forEach((r) => r.addEventListener("click", () => select(r.dataset.go)));
+    panel.querySelectorAll("[data-file]").forEach((f) => f.addEventListener("click", () => {
+      if (!bridge("openFile", { component: n.id, path: f.dataset.file })) navigator.clipboard?.writeText(f.dataset.file);
+    }));
+    const show = () => { $("promptbox").hidden = false; };
+    $("showprompt")?.addEventListener("click", show);
+    $("build")?.addEventListener("click", () => { if (!bridge("build", { component: n.id, prompt: n.prompt })) show(); });
+    $("copy")?.addEventListener("click", (ev) => {
+      navigator.clipboard?.writeText(n.prompt);
+      ev.target.textContent = "Copied";
+    });
+  }
+
+  function select(id) {
+    state.selected = id;
+    history.replaceState(null, "", id ? "#" + encodeURIComponent(id) : location.pathname);
+    render();
+    paint();
+  }
+
+  // ---------------------------------------------------------------- header
+  $("title").textContent = M.repo + " · living map";
+  $("subtitle").textContent = `${M.nodes.length} components from ${M.plans.length} plan docs · ` +
+    (M.tests.ran ? `${M.tests.passed} tests passed, ${M.tests.failed} failed (${M.tests.at})` : "tests not run") +
+    ` · measured ${M.generated}`;
+  $("legend").innerHTML = Object.entries(KIND).map(([k, [text, style, v]]) =>
+    `<span class="chip" data-kind="${k}"><i class="${style}" style="border-color:${css(v)}"></i>${text} ` +
+    `<span class="muted">${M.edges.filter((e) => look(e) === k).length}</span></span>`).join("") +
+    `<span class="chip off" id="every" title="Also draw edges the plan already implies by a longer route">every edge</span>`;
+  document.querySelectorAll("[data-kind]").forEach((c) => c.addEventListener("click", () => {
+    state.kinds[c.dataset.kind] = !state.kinds[c.dataset.kind];
+    c.classList.toggle("off", !state.kinds[c.dataset.kind]);
+    paint();
+  }));
+  $("every").addEventListener("click", (ev) => {
+    state.every = !state.every;
+    ev.target.classList.toggle("off", !state.every);
+    paint();
+  });
+
+  // -------------------------------------------------------------- timeline
+  const scrub = $("scrub");
+  scrub.max = NOW;
+  scrub.value = NOW;
+  const start = M.timeline[0]?.t ?? 0;
+  const label = () => {
+    if (state.t >= NOW) { $("when").innerHTML = "<b>Now</b>, with plans overlaid"; return; }
+    const c = M.timeline[state.t], mins = Math.round((c.t - start) / 60);
+    $("when").innerHTML = `<b>+${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, "0")}m</b> · ${esc(c.subject)}`;
+  };
+  scrub.addEventListener("input", () => { state.t = Number(scrub.value); label(); paint(); });
+  let timer = null;
+  $("play").addEventListener("click", () => {
+    if (timer) { clearInterval(timer); timer = null; $("play").textContent = "▶ Replay"; return; }
+    state.t = 0;
+    $("play").textContent = "❚❚ Pause";
+    timer = setInterval(() => {
+      scrub.value = state.t; label(); paint();
+      if (state.t++ >= NOW) { clearInterval(timer); timer = null; $("play").textContent = "▶ Replay"; state.t = NOW; }
+    }, 320);
+  });
+
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") select(null); });
+  label();
+  const fromHash = () => {
+    const asked = decodeURIComponent(location.hash.slice(1));
+    select(byId.has(asked) ? asked : null);
+  };
+  addEventListener("hashchange", fromHash);
+  fromHash();
+})();
+</script>
+</body>
+</html>

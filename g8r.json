@@ -1,0 +1,6 @@
+{
+  "plans": ["PLAN.md"],
+  "build_command": "swift build",
+  "test_command": "swift test",
+  "ignore": ["Vendor/**", "planmap/**"]
+}
