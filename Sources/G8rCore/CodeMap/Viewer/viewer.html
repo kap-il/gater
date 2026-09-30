@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>g8r living map</title>
 <style>
+/*G8R_FONTS*/
+</style>
+<style>
   :root {
     color-scheme: dark;
     --bg: #07110B; --surface: #0C1A12; --soft: #122419; --code: #0A160F; --line: #1E3A28;
@@ -14,11 +17,14 @@
     --blocked: #3E5446; --unplanned: #8C7A3A; --building: #7A9A2E;
     --confirmed: #4F6B55; --undeclared: #8C7A3A; --unrealized: #5E8C7A; --neutral: #4F6B55;
     --warn-bg: #1A1C0C;
-    --display: "Luminari", "Herculanum", "Trattatello", serif;
-    --body: "Hoefler Text", "Iowan Old Style", "Palatino", Georgia, serif;
-    --mono: "Courier New", Courier, monospace;
+    --display: "VT323", "IBM 3270", Menlo, monospace;
+    --body: "IBM 3270", Menlo, monospace;
+    --mono: "IBM 3270", Menlo, monospace;
+    --glow: 0 0 6px rgba(94, 158, 90, .35);
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; font-synthesis: none; }
+  b, strong { font-weight: normal; color: var(--bright); }
+  em, i { font-style: normal; }
   html, body { height: 100%; }
   body {
     margin: 0; color: var(--ink);
@@ -38,8 +44,8 @@
     box-shadow: 0 1px 0 #07110B, 0 2px 0 var(--line);
   }
   header .mark { font-size: 10px; color: var(--bright); }
-  header h1 { font: 20px/1.1 var(--display); margin: 0; color: var(--ink); letter-spacing: .01em; }
-  header .sub { color: var(--muted); font-size: 12.5px; font-style: italic; }
+  header h1 { font: 26px/1 var(--display); margin: 0; color: var(--ink); letter-spacing: .08em; text-transform: uppercase; text-shadow: var(--glow); }
+  header .sub { color: var(--muted); font-size: 12.5px; }
   .actions { display: flex; gap: 6px; align-items: center; }
   #busy { font-size: 12px; color: var(--building); font-family: var(--mono); }
   #busy:empty { display: none; }
@@ -66,7 +72,7 @@
   #chart { display: block; margin: 0 auto; }
   #empty { color: var(--muted); padding: 40px; text-align: center; }
   #empty .ascii { display: inline-block; text-align: left; color: var(--accent); font-size: 13px; margin-bottom: 14px; }
-  #empty p { font: 18px var(--display); color: var(--muted); margin: 0; }
+  #empty p { font: 22px var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0; }
   #empty[hidden] { display: none; }
   #time {
     position: sticky; bottom: 0; display: flex; align-items: center; gap: 12px;
@@ -83,22 +89,22 @@
     padding: 18px 20px 40px;
   }
   aside .crest { font-size: 12px; color: var(--bright); margin-bottom: 8px; }
-  aside h2 { font: 22px/1.25 var(--display); margin: 0 0 4px; color: var(--ink); }
+  aside h2 { font: 28px/1.1 var(--display); letter-spacing: .05em; text-shadow: var(--glow); margin: 0 0 4px; color: var(--ink); }
   aside h3 {
-    font: 12px/1 var(--mono); color: var(--bright); white-space: nowrap; overflow: hidden;
-    margin: 24px 0 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    font: 13px/1 var(--mono); color: var(--bright); white-space: nowrap; overflow: hidden;
+    margin: 24px 0 10px; letter-spacing: .08em; text-transform: uppercase;
   }
   aside h3::before { content: "══╡ "; color: var(--teal); }
   aside h3::after { content: " ╞════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════"; color: var(--teal); }
   aside p { margin: 6px 0; }
   .pill {
-    display: inline-block; padding: 1px 8px; border-radius: 3px; font: 600 11px var(--body);
+    display: inline-block; padding: 1px 8px; border-radius: 3px; font: 11px var(--body);
     color: var(--bg); vertical-align: 4px; margin-left: 8px;
   }
   .muted { color: var(--muted); }
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 14px 0 4px; }
   .stat { background: var(--soft); border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; }
-  .stat b { display: block; font: 700 19px var(--mono); color: var(--bright); }
+  .stat b { display: block; font: 19px var(--mono); color: var(--bright); }
   .stat span { font-size: 11.5px; color: var(--muted); }
   .row {
     display: flex; align-items: baseline; gap: 8px; padding: 5px 8px; margin: 0 -8px;
@@ -126,7 +132,7 @@
   .note { font-size: 13px; background: var(--soft); border-left: 2px solid var(--unplanned); border-radius: 3px; padding: 6px 10px; }
   button.primary {
     border: 1px solid var(--bright); background: var(--accent); color: var(--ink); border-radius: 4px; padding: 7px 16px;
-    font: 15px var(--display); cursor: pointer; box-shadow: 0 0 0 3px var(--bg), 0 0 0 4px var(--line);
+    font: 20px/1 var(--display); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; box-shadow: 0 0 0 3px var(--bg), 0 0 0 4px var(--line);
   }
   button.primary:hover { background: var(--bright); color: var(--bg); }
   button.primary[disabled] { background: var(--blocked); border-color: var(--line); color: var(--ink); opacity: .7; cursor: not-allowed; }
@@ -140,8 +146,8 @@
   .node { cursor: pointer; transition: opacity .18s; }
   .node rect.box { fill: var(--surface); stroke: var(--line); stroke-width: 1; filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)); }
   .node rect.bar { stroke: none; }
-  .node text.name { font: 15px var(--display); fill: var(--ink); }
-  .node text.meta { font: italic 11.5px var(--body); fill: var(--muted); }
+  .node text.name { font: 18px var(--display); letter-spacing: .02em; fill: var(--ink); }
+  .node text.meta { font: 11.5px var(--body); fill: var(--muted); }
   .node:hover rect.box { stroke: var(--accent); }
   .node.planned rect.box { fill: var(--code); stroke-dasharray: 5 4; stroke: var(--planned); filter: none; }
   .node.planned.blocked rect.box { stroke: var(--blocked); }
@@ -397,7 +403,7 @@
                           transform: `translate(${p.x},${p.y})` }, nodeLayer);
       el("rect", { class: "box", width: W, height: H, rx: 9 }, g);
       el("rect", { class: "bar", x: 0, y: 9, width: 3.5, height: H - 18, rx: 2, style: `fill:${colorOf(n)}` }, g);
-      el("text", { class: "name", x: 13, y: 21 }, g).textContent = short(n.name, 22);
+      el("text", { class: "name", x: 13, y: 21 }, g).textContent = short(n.name, 15);
       el("text", { class: "meta", x: 13, y: 38 }, g);
       g.addEventListener("mouseenter", () => { state.hover = n.id; paint(); });
       g.addEventListener("mouseleave", () => { state.hover = null; paint(); });
