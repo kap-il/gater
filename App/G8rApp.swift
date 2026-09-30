@@ -338,11 +338,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Following the active shell
 
-    /// Once a second, while g8r is the active app, reads the active shell's
+    /// Four times a second, while g8r is the active app, reads the active shell's
     /// working folder; `ProjectRoot` moves the root when that folder
     /// belongs to another project.
     private func startFollowing() {
-        followTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        followTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             self?.followActiveShell()
         }
     }

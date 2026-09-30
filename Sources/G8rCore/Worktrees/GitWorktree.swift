@@ -61,6 +61,18 @@ public enum GitWorktree {
         return root.isEmpty ? nil : root
     }
 
+    /// For a worktree g8r made (a linked worktree on a `g8r/` branch), the
+    /// top level of the main repository it belongs to; nil for a main
+    /// checkout, a worktree on any other branch, or no repository.
+    public static func mainRepository(ofG8rWorktree worktree: String) -> String? {
+        guard let dirs = try? git(["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir",
+                                   "--abbrev-ref", "HEAD"], in: worktree), dirs.status == 0 else { return nil }
+        let lines = dirs.output.split(separator: "\n").map(String.init)
+        guard lines.count == 3, lines[0] != lines[1], lines[2].hasPrefix("g8r/") else { return nil }
+        // The common dir is `<main>/.git`.
+        return (lines[1] as NSString).deletingLastPathComponent
+    }
+
     /// Paths of every worktree registered with the repository.
     public static func list(repoRoot: String) throws -> [String] {
         let result = try git(["worktree", "list", "--porcelain"], in: repoRoot)

@@ -132,11 +132,41 @@ final class ProjectRootTests: XCTestCase {
 
     func testAnUnchangedFolderIsNotResolvedAgain() {
         var calls = 0
-        let project = ProjectRoot(path: "/w/app") { calls += 1; return $0 == "/w/x" ? "/w/x" : "/w/app" }
+        let clock = Date(timeIntervalSince1970: 0)
+        let project = ProjectRoot(path: "/w/app", now: { clock }) { calls += 1; return $0 == "/w/x" ? "/w/x" : "/w/app" }
         for _ in 0..<5 { project.follow(folder: "/w/app/src", pane: "shell-1") }
         XCTAssertEqual(calls, 1)
         project.follow(folder: "/w/x", pane: "shell-1")
         XCTAssertEqual(calls, 2)
         XCTAssertEqual(project.path, "/w/x")
+    }
+
+    func testAnUnchangedFolderIsResolvedAgainAfterAWhile() {
+        // `git init` in place: same folder, new answer.
+        var clock = Date(timeIntervalSince1970: 0)
+        var initialized = false
+        let project = ProjectRoot(path: "/w", now: { clock }) { _ in initialized ? "/w/new" : "/w" }
+        XCTAssertNil(project.follow(folder: "/w/new", pane: "shell-1"))
+        initialized = true
+        clock += 1
+        XCTAssertNil(project.follow(folder: "/w/new", pane: "shell-1"))
+        clock += ProjectRoot.recheck
+        XCTAssertEqual(project.follow(folder: "/w/new", pane: "shell-1")?["to"], .string("/w/new"))
+    }
+
+    func testAG8rWorktreeCountsAsItsMainRepository() throws {
+        let main = (sandbox as NSString).appendingPathComponent("app")
+        try FileManager.default.createDirectory(atPath: main, withIntermediateDirectories: true)
+        for args in [["init", "-q", "-b", "main"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init"]] {
+            XCTAssertEqual(try GitWorktree.git(args, in: main).status, 0)
+        }
+        let worktree = try GitWorktree.ensure(delegate: "auth", repoRoot: main)
+        try FileManager.default.createDirectory(atPath: worktree + "/src", withIntermediateDirectories: true)
+        XCTAssertEqual(ProjectRoot.resolve(worktree + "/src", home: "/nowhere"), ProjectRoot.canonical(main))
+
+        // A worktree on someone else's branch is its own project.
+        let other = (sandbox as NSString).appendingPathComponent("other")
+        XCTAssertEqual(try GitWorktree.git(["worktree", "add", "-q", "-b", "feature", other], in: main).status, 0)
+        XCTAssertEqual(ProjectRoot.resolve(other, home: "/nowhere"), ProjectRoot.canonical(other))
     }
 }
