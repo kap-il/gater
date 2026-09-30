@@ -46,7 +46,8 @@ public enum MapViewer {
         let root = URL(fileURLWithPath: planRoot)
         var paths = (map?.docs ?? []).map { root.appendingPathComponent($0.path).path }
         paths.append(root.appendingPathComponent("g8r.json").path)
-        if map == nil { paths.append(root.appendingPathComponent("PLAN.md").path) }
+        // Always watched, so a plan written after the app opened is found.
+        paths.append(root.appendingPathComponent("PLAN.md").path)
         return Array(Set(paths)).sorted()
     }
 

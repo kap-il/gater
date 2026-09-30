@@ -272,28 +272,47 @@
     };
     M.nodes.forEach((n) => layerOf(n.id));
 
-    const rows = [];
-    M.nodes.forEach((n) => (rows[layer.get(n.id)] ??= []).push(n.id));
-    for (let r = 0; r < rows.length; r++) rows[r] ??= [];
-    const widest = Math.max(1, ...rows.map((r) => r.length));
-    width = widest * W + (widest - 1) * GX + PAD * 2 + 70;
-    height = rows.length * H + Math.max(0, rows.length - 1) * GY + PAD * 2;
-    pos = new Map();
-    const place = () => rows.forEach((row, r) => row.forEach((id, i) => {
-      const span = row.length * W + (row.length - 1) * GX;
-      pos.set(id, { x: 70 + (width - 70 - span) / 2 + i * (W + GX), y: PAD + r * (H + GY) });
+    const layers = [];
+    M.nodes.forEach((n) => (layers[layer.get(n.id)] ??= []).push(n.id));
+    for (let r = 0; r < layers.length; r++) layers[r] ??= [];
+
+    // Order each level to cross fewer edges, as if every level were one row.
+    const place = (rows, left, span) => rows.forEach((row, r) => row.forEach((id, i) => {
+      const used = row.length * W + (row.length - 1) * GX;
+      pos.set(id, { x: left + (span - used) / 2 + i * (W + GX), y: PAD + r * (H + GY) });
     }));
-    place();
+    const wide = Math.max(1, ...layers.map((r) => r.length));
+    const wideSpan = wide * W + (wide - 1) * GX;
+    pos = new Map();
+    place(layers, 70, wideSpan);
     const centre = (ids) => ids.length ? ids.reduce((s, id) => s + pos.get(id).x, 0) / ids.length : null;
     for (let pass = 0; pass < 6; pass++) {                 // fewer crossings
       const down = pass % 2 === 0;
-      for (const row of down ? rows : [...rows].reverse()) {
+      for (const row of down ? layers : [...layers].reverse()) {
         const key = new Map(row.map((id) => [id, centre(down ? needs.get(id) : neededBy.get(id)) ?? pos.get(id).x]));
         row.sort((a, b) => key.get(a) - key.get(b));
       }
-      place();
+      place(layers, 70, wideSpan);
     }
-    return { rows, edges };
+
+    // A level wider than the stage wraps onto more rows, so boxes stay
+    // readable instead of the whole chart shrinking to fit.
+    const room = Math.max(($("stage")?.clientWidth || 900) - 36, 600);
+    const perRow = Math.max(3, Math.floor((room - 70 - PAD * 2 + GX) / (W + GX)));
+    const rows = [], labels = [];
+    layers.forEach((ids, l) => {
+      for (let i = 0; i < Math.max(ids.length, 1); i += perRow) {
+        rows.push(ids.slice(i, i + perRow));
+        labels.push(i === 0 ? (l === 0 ? "needs nothing" : "level " + l) : "");
+      }
+    });
+    const widest = Math.max(1, ...rows.map((r) => r.length));
+    const span = widest * W + (widest - 1) * GX;
+    width = span + PAD * 2 + 70;
+    height = rows.length * H + Math.max(0, rows.length - 1) * GY + PAD * 2;
+    pos = new Map();
+    place(rows, 70, span);
+    return { rows, labels, edges };
   }
 
   // An arrow runs from what is needed to what needs it: the order to build in.
@@ -317,7 +336,7 @@
   function drawChart() {
     svg.replaceChildren();
     $("empty").hidden = M.nodes.length > 0;
-    const { rows, edges } = layout();
+    const { rows, labels, edges } = layout();
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
     svg.setAttribute("width", width);
     svg.style.maxWidth = "100%";
@@ -330,7 +349,7 @@
       el("path", { d: "M0,0 L10,5 L0,10 z", style: `fill:${css(v)}` }, m);
     }
     rows.forEach((_, r) => el("text", { class: "layer-label", x: 4, y: PAD + r * (H + GY) + H / 2 + 3 })
-      .textContent = r === 0 ? "needs nothing" : "level " + r);
+      .textContent = labels[r]);
 
     const edgeLayer = el("g"), nodeLayer = el("g");
     edgeEls = edges.map((e) => {
@@ -622,6 +641,13 @@
     paint();
   }
   window.g8r = { setMap, setBusy: (text) => say(text) };
+
+  // Rows wrap to the stage's width, so a resize lays the chart out again.
+  let resizeTimer = null;
+  addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (M) { drawChart(); paint(); } }, 150);
+  });
 
   document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") select(null); });
   const fromHash = () => select(decodeURIComponent(location.hash.slice(1)) || null);

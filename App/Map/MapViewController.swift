@@ -18,7 +18,12 @@ final class MapViewController: NSViewController, WKScriptMessageHandler, WKNavig
     private var measuring = false
     /// Another refresh was asked for while one was running.
     private var pending: Bool?
-    private var mtimes: [String: Date] = [:]
+    /// Plan doc and config times as of the last refresh that let a model
+    /// read the plan. Routine redraws don't move it, so an edit a hook
+    /// event redrew still gets read.
+    private var readMtimes: [String: Date] = [:]
+    /// Times at the previous check, to tell when a doc has stopped changing.
+    private var seenMtimes: [String: Date] = [:]
     private var watchTimer: Timer?
     private var lastEventRefresh = Date.distantPast
     private var eventRefreshScheduled = false
@@ -63,20 +68,23 @@ final class MapViewController: NSViewController, WKScriptMessageHandler, WKNavig
             return
         }
         measuring = true
-        if map == nil { setBusy("Measuring…") }
+        if extract { setBusy("Reading the plan…") } else if map == nil { setBusy("Measuring…") }
         let root = planRoot
+        // Taken before measuring, so an edit made while a model reads the
+        // plan is read again afterwards.
+        let times = currentMtimes()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Result { try StandardMap.build(planRoot: root, extract: extract) }
-            DispatchQueue.main.async { self?.finished(result) }
+            DispatchQueue.main.async { self?.finished(result, readTimes: extract ? times : nil) }
         }
     }
 
-    private func finished(_ result: Result<LivingMap, Error>) {
+    private func finished(_ result: Result<LivingMap, Error>, readTimes: [String: Date]?) {
         measuring = false
         switch result {
         case .success(let map):
             self.map = map
-            mtimes = currentMtimes()
+            if let readTimes { readMtimes = readTimes }
             setBusy(nil)
             push()
         case .failure(let error):
@@ -130,11 +138,16 @@ final class MapViewController: NSViewController, WKScriptMessageHandler, WKNavig
         return out
     }
 
-    /// A plan doc or g8r.json changed on disk: measure again, and let a
-    /// model read a free-form doc that changed.
+    /// A plan doc or g8r.json is new or changed since the plan was last
+    /// read: once it has been still for one check (two seconds), measure
+    /// again and let a model read a free-form doc. A model is only asked
+    /// about a doc whose text it hasn't read, so this costs nothing when
+    /// the answer is cached.
     private func checkWatchedFiles() {
         guard map != nil, !measuring else { return }
-        if currentMtimes() != mtimes { refresh(extract: true) }
+        let now = currentMtimes()
+        defer { seenMtimes = now }
+        if now != readMtimes, now == seenMtimes { refresh(extract: true) }
     }
 
     // MARK: - Snapshot
