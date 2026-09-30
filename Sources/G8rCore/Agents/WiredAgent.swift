@@ -18,17 +18,36 @@ public struct WiredAgent: Equatable, Sendable {
         self.since = Date(timeIntervalSince1970: floor(since.timeIntervalSince1970))
     }
 
+    /// It was given something to do and hasn't gone idle since: its pane
+    /// has had an edit, a command, a typed line or a change request after
+    /// its last `stop`. Both agents queue what is typed while they work.
+    public private(set) var busy = false
+
     /// Takes in one event; true when it changed the agent.
     @discardableResult
     public mutating func note(_ event: G8rEvent) -> Bool {
-        guard event.kind == "agent_started",
-              let agent = event["agent"]?.stringValue.flatMap(Agent.init(name:)),
+        guard event.kind == "agent_started" else {
+            noteActivity(event)
+            return false
+        }
+        guard let agent = event["agent"]?.stringValue.flatMap(Agent.init(name:)),
               let ts = event.ts.flatMap({ ISO8601DateFormatter().date(from: $0) }), ts >= since
         else { return false }
         let changed = agent != self.agent
         self.agent = agent
         pane = event.pane
+        // A freshly started agent waits at its prompt.
+        busy = false
         return changed
+    }
+
+    private mutating func noteActivity(_ event: G8rEvent) {
+        guard let pane, event.pane == pane else { return }
+        switch event.kind {
+        case "stop": busy = false
+        case "edit", "command", "human_intervention", ChangeRequest.eventKind: busy = true
+        default: break
+        }
     }
 
     /// Why Build is off while there is no agent, for the map to show.

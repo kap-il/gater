@@ -44,4 +44,25 @@ final class WiredAgentTests: XCTestCase {
         XCTAssertFalse(wired.note(G8rEvent(fields: ["kind": .string("agent_started"), "agent": .string("claude")])))
         XCTAssertNil(wired.agent)
     }
+
+    func testBusyUntilItsPaneStops() {
+        var wired = WiredAgent(since: launch)
+        func event(_ kind: String, pane: String = "shell-1") -> G8rEvent {
+            G8rEvent(kind: kind, ts: launch.addingTimeInterval(5), extra: ["pane": .string(pane)])
+        }
+        wired.note(event("edit"))
+        XCTAssertFalse(wired.busy, "no agent yet")
+        wired.note(started("claude", at: 1))
+        XCTAssertFalse(wired.busy, "a new agent waits at its prompt")
+        wired.note(event(ChangeRequest.eventKind))
+        XCTAssertTrue(wired.busy)
+        wired.note(event("stop", pane: "shell-2"))
+        XCTAssertTrue(wired.busy, "another pane's stop")
+        wired.note(event("stop"))
+        XCTAssertFalse(wired.busy)
+        wired.note(event("command"))
+        XCTAssertTrue(wired.busy)
+        wired.note(started("codex", pane: "shell-2", at: 2))
+        XCTAssertFalse(wired.busy)
+    }
 }

@@ -11,6 +11,8 @@ final class MapViewController: NSViewController, WKScriptMessageHandler, WKNavig
     private(set) var planRoot: String
     var onBuild: ((_ component: String) -> Void)?
     var onRunTests: (() -> Void)?
+    /// "Change this" on a built node: the component and what the user typed.
+    var onChange: ((_ component: String, _ text: String) -> Void)?
 
     private var webView: WKWebView!
     /// The map as last measured.
@@ -217,6 +219,9 @@ final class MapViewController: NSViewController, WKScriptMessageHandler, WKNavig
         case "openFile":
             guard let path = body["path"] as? String else { return }
             openFile(path, component: body["component"] as? String)
+        case "change":
+            guard let component = body["component"] as? String, let text = body["text"] as? String else { return }
+            if let onChange { onChange(component, text) } else { setBusy(ChangeRequest.missing) }
         case "runTests":
             if let onRunTests { onRunTests() } else { setBusy("Running tests from the map isn't available yet.") }
         case "refresh":

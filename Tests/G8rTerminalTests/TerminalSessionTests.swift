@@ -37,6 +37,21 @@ final class TerminalSessionTests: XCTestCase {
         XCTAssertTrue(all.contains("got:wake up"), all)
     }
 
+    /// A program started at an interactive shell's prompt has the
+    /// terminal; the shell at its prompt doesn't count.
+    func testForegroundJobIsAProgramStartedAtThePrompt() throws {
+        let config = LaunchConfig(executable: "/bin/zsh", arguments: ["zsh", "-f", "-i"],
+                                  environment: ["PATH": "/usr/bin:/bin", "TERM": "xterm-256color"])
+        let session = try TerminalSession(config: config, size: size)
+        defer { session.terminate() }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        XCTAssertFalse(session.hasForegroundJob, "the shell at its prompt")
+        session.inject(text: "sleep 30", submit: true)
+        XCTAssertTrue(waitUntil { session.hasForegroundJob }, "sleep has the terminal")
+        session.send([0x03]) // ^C
+        XCTAssertTrue(waitUntil { !session.hasForegroundJob }, "back at the prompt")
+    }
+
     func testWorkingDirectoryAndEnvironment() throws {
         let dir = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().path
         let config = LaunchConfig(executable: "/bin/sh",

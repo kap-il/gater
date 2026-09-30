@@ -46,6 +46,21 @@ final class MapViewerTests: XCTestCase {
         XCTAssertFalse(shell.contains("https://"))
     }
 
+    /// The change box shows on the nodes `ChangeRequest` accepts, built
+    /// ones, and never on planned ones; it posts `change` over the bridge.
+    func testChangeBoxIsOnlyOnNodesWithCode() throws {
+        let shell = try MapViewer.shell()
+        let pattern = #"const takesChanges = \(n\) => \[([^\]]*)\]\.includes\(n\.status\)"#
+        let match = try XCTUnwrap(shell.range(of: pattern, options: .regularExpression), "the page gates the box")
+        let list = String(shell[match])
+        for status in [NodeStatus.built, .proven, .unproven, .failing, .unplanned, .planned, .building] {
+            XCTAssertEqual(list.contains("\"\(status.rawValue)\""), ChangeRequest.accepts(status), status.rawValue)
+        }
+        XCTAssertTrue(shell.contains("${takesChanges(n) ? changeBox(n) : \"\"}"))
+        XCTAssertTrue(shell.contains(#"bridge("change", { component: n.id, text })"#))
+        XCTAssertTrue(shell.contains(ChangeRequest.missing))
+    }
+
     func testSymbolLinesFindDeclarations() {
         let text = "import Foundation\n// uses Widget\nstruct Widget {\n}\nfunc make() {}\n"
         let lines = MapViewer.symbolLines(in: text, symbols: [MapSymbol(kind: "struct", name: "Widget"),
