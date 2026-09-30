@@ -65,6 +65,17 @@ final class PaneManager {
         return try spawn(id: id, role: .delegate, name: name, worktree: worktree, command: agentCommand(named: id))
     }
 
+    /// A build session from the map: its worktree is already made and
+    /// set up; this trusts it if asked, installs the hooks, and starts the
+    /// launch's command there.
+    @discardableResult
+    func spawnBuild(_ launch: BuildLaunch) throws -> Pane {
+        if let existing = pane(id: launch.pane) { return existing }
+        if trustWorktrees { try? ClaudeTrust.trustWorktree(launch.worktree, createdFrom: repoRoot) }
+        return try spawn(id: launch.pane, role: .build, name: launch.component, worktree: launch.worktree,
+                         command: launch.command, environment: launch.environment)
+    }
+
     @discardableResult
     func spawnShell(in directory: String? = nil) throws -> Pane {
         shellCount += 1
@@ -72,8 +83,9 @@ final class PaneManager {
                          worktree: directory ?? repoRoot, command: nil)
     }
 
-    private func spawn(id: String, role: PaneRole, name: String, worktree: String, command: String?) throws -> Pane {
-        var env: [String: String] = [:]
+    private func spawn(id: String, role: PaneRole, name: String, worktree: String, command: String?,
+                       environment: [String: String] = [:]) throws -> Pane {
+        var env = environment
         if let path = pathWithHookDirectory() { env["PATH"] = path }
         if role != .shell {
             // Shell panes aren't tracked: without a pane id, g8r-hook
@@ -91,7 +103,7 @@ final class PaneManager {
             guard let self, let pane else { return }
             self.onPaneTitleChanged?(pane)
         }
-        if role == .delegate {
+        if role == .delegate || role == .build {
             pane.view.onHumanInput = { [weak self] input in self?.recordHumanInput(input, pane: id) }
         }
 

@@ -41,4 +41,14 @@ final class HookProcessorTests: XCTestCase {
         XCTAssertEqual(event["hook"]?.stringValue, "Notification")
         XCTAssertEqual(event["message"]?.stringValue, "hi")
     }
+
+    func testBuildSessionEventsCarryTheirComponent() {
+        let build = HookProcessor.Environment(paneId: "build-cart", component: "cart")
+        let payload: [String: JSONValue] = ["hook_event_name": .string("Stop")]
+        let event = HookProcessor.process(payload: payload, env: build).first
+        XCTAssertEqual(event?.pane, "build-cart")
+        XCTAssertEqual(event?["component"]?.stringValue, "cart")
+        XCTAssertNil(HookProcessor.process(payload: payload, env: delegate).first?["component"],
+                     "other panes don't say")
+    }
 }

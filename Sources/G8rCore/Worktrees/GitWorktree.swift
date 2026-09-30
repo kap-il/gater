@@ -79,6 +79,14 @@ public enum GitWorktree {
     /// worktree, it's checked out rather than recreated.
     @discardableResult
     public static func ensure(delegate name: String, repoRoot: String) throws -> String {
+        try ensure(delegate: name, repoRoot: repoRoot, base: nil)
+    }
+
+    /// `ensure`, branching a new `g8r/<name>` from `base` (a commit or a
+    /// branch) instead of `HEAD`. A branch or worktree that already exists
+    /// is reused as it is, whatever `base` says.
+    @discardableResult
+    public static func ensure(delegate name: String, repoRoot: String, base: String?) throws -> String {
         guard isValidName(name) else { throw GitWorktreeError.invalidName(name) }
         guard let root = self.repoRoot(containing: repoRoot) else {
             throw GitWorktreeError.notARepository(repoRoot)
@@ -108,7 +116,7 @@ public enum GitWorktree {
         let branchExists = (try? git(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"], in: root))?.status == 0
         let args = branchExists
             ? ["worktree", "add", target, branch]
-            : ["worktree", "add", target, "-b", branch]
+            : ["worktree", "add", target, "-b", branch] + (base.map { [$0] } ?? [])
         let result = try git(args, in: root)
         guard result.status == 0 else {
             throw GitWorktreeError.gitFailed(arguments: args, status: result.status, output: result.output)

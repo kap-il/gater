@@ -12,7 +12,8 @@ final class MapViewController: NSViewController, WKScriptMessageHandler, WKNavig
     var onRunTests: (() -> Void)?
 
     private var webView: WKWebView!
-    private var map: LivingMap?
+    /// The map as last measured.
+    private(set) var map: LivingMap?
     private var pageReady = false
     private var measuring = false
     /// Another refresh was asked for while one was running.

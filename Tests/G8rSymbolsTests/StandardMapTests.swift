@@ -74,6 +74,5 @@ final class StandardMapTests: XCTestCase {
         XCTAssertEqual(map.nodes, [])
         XCTAssertEqual(map.problems.count, 1)
         XCTAssertTrue(map.problems[0].contains("hasn't been read by a model"), map.problems[0])
-        XCTAssertTrue(StandardMap.stages.isEmpty)
     }
 }

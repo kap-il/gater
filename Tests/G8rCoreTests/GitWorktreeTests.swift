@@ -61,6 +61,22 @@ final class GitWorktreeTests: XCTestCase {
         XCTAssertEqual(try GitWorktree.list(repoRoot: repo).count, 2)
     }
 
+    func testEnsureBranchesFromTheGivenBase() throws {
+        let first = try XCTUnwrap(GitWorktree.head(of: repo))
+        let second = try GitWorktree.git(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+                                          "--allow-empty", "-m", "second"], in: repo)
+        XCTAssertEqual(second.status, 0, second.output)
+        XCTAssertNotEqual(GitWorktree.head(of: repo), first)
+
+        let path = try GitWorktree.ensure(delegate: "old", repoRoot: repo, base: first)
+        XCTAssertEqual(GitWorktree.head(of: path), first)
+        let fromHead = try GitWorktree.ensure(delegate: "new", repoRoot: repo, base: nil)
+        XCTAssertEqual(GitWorktree.head(of: fromHead), GitWorktree.head(of: repo))
+        XCTAssertEqual(try GitWorktree.ensure(delegate: "old", repoRoot: repo, base: "main"), path,
+                       "an existing worktree is reused whatever the base")
+        XCTAssertEqual(GitWorktree.head(of: path), first)
+    }
+
     func testEnsureReusesSurvivingBranch() throws {
         let path = try GitWorktree.ensure(delegate: "auth", repoRoot: repo)
         XCTAssertEqual(try GitWorktree.git(["worktree", "remove", path], in: repo).status, 0)

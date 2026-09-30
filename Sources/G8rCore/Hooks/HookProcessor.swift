@@ -8,10 +8,14 @@ import Foundation
 public enum HookProcessor {
     public struct Environment: Equatable {
         public var paneId: String
+        /// The component a build session is building (`G8R_COMPONENT`);
+        /// nil for every other pane.
+        public var component: String?
         public var now: Date
 
-        public init(paneId: String, now: Date = Date()) {
+        public init(paneId: String, component: String? = nil, now: Date = Date()) {
             self.paneId = paneId
+            self.component = component
             self.now = now
         }
     }
@@ -25,6 +29,7 @@ public enum HookProcessor {
             var fields = extra
             fields["kind"] = .string(kind)
             fields["pane"] = .string(env.paneId)
+            if let component = env.component, !component.isEmpty { fields["component"] = .string(component) }
             fields["ts"] = .string(ts)
             if let session = payload["session_id"] { fields["session"] = session }
             return G8rEvent(fields: fields)
