@@ -31,18 +31,20 @@ final class PaneTileView: NSView {
         layer?.borderWidth = 1
         layer?.cornerRadius = 4
         layer?.masksToBounds = true
+        layer?.backgroundColor = Theme.background.cgColor
 
         header.wantsLayer = true
-        header.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        header.layer?.backgroundColor = Theme.raised.cgColor
         header.translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        titleLabel.font = Theme.label(13)
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
         chevron.isBordered = false
         chevron.title = "▾"
-        chevron.font = NSFont.systemFont(ofSize: 11)
+        chevron.font = Theme.label(12)
+        chevron.contentTintColor = Theme.muted
         chevron.target = self
         chevron.action = #selector(toggleClicked)
         chevron.toolTip = "Collapse / expand (or double-click the title bar)"
@@ -54,7 +56,8 @@ final class PaneTileView: NSView {
 
         let close = NSButton(title: "✕", target: self, action: #selector(closeClicked))
         close.isBordered = false
-        close.font = NSFont.systemFont(ofSize: 10)
+        close.font = Theme.label(11)
+        close.contentTintColor = Theme.muted
         close.toolTip = "Close pane (the worktree is kept)"
         close.translatesAutoresizingMaskIntoConstraints = false
 
@@ -99,14 +102,14 @@ final class PaneTileView: NSView {
         let branch = "g8r/\(pane.name)"
         let live = pane.session.title
         titleLabel.stringValue = live.isEmpty
-            ? "\(pane.displayTitle)  ·  \(branch)"
-            : "\(pane.displayTitle)  ·  \(branch)  ·  \(live)"
+            ? "╡ \(pane.displayTitle) · \(branch) ╞"
+            : "╡ \(pane.displayTitle) · \(branch) ╞ \(live)"
     }
 
     func setFocused(_ focused: Bool) {
-        layer?.borderColor = (focused ? NSColor.controlAccentColor : NSColor.separatorColor).cgColor
+        layer?.borderColor = (focused ? Theme.brightAccent : Theme.line).cgColor
         layer?.borderWidth = focused ? 2 : 1
-        titleLabel.textColor = focused ? .labelColor : .secondaryLabelColor
+        titleLabel.textColor = focused ? Theme.brightAccent : Theme.ink
     }
 
     func setCollapsed(_ collapsed: Bool) {
