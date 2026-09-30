@@ -10,7 +10,11 @@ final class TerminalView: NSView {
     let session: TerminalSession
     private let font = TerminalFont()
     private let padding: CGFloat = 4
-    private static let selectionColor = RGB(r: 0x3A, g: 0x5F, b: 0x9E)
+    private static let selectionColor = RGB(r: 0x2C, g: 0x5E, b: 0x3C)
+    /// Used where a cell has no explicit color (g8r's palette, not libghostty's).
+    private static let defaultBackground = RGB(r: 0x0B, g: 0x1A, b: 0x12)
+    private static let defaultForeground = RGB(r: 0xD8, g: 0xE8, b: 0xD0)
+    private static let cursorColor = RGB(r: 0x6F, g: 0xBF, b: 0x73)
     /// True while a mouse drag is making a selection (vs. being reported
     /// to a mouse-tracking program).
     private var selecting = false
@@ -106,7 +110,7 @@ final class TerminalView: NSView {
         let snap = session.core.snapshot()
         let cellH = font.cellSize.height
 
-        ctx.setFillColor(snap.background.cgColor)
+        ctx.setFillColor(Self.defaultBackground.cgColor)
         ctx.fill(bounds)
 
         for (y, row) in snap.cells.enumerated() {
@@ -127,10 +131,10 @@ final class TerminalView: NSView {
     }
 
     private func resolvedColors(_ cell: Cell, snap: ScreenSnapshot) -> (fg: RGB, bg: RGB?) {
-        var fg = cell.fg ?? snap.foreground
+        var fg = cell.fg ?? Self.defaultForeground
         var bg = cell.bg
         if cell.style.contains(.inverse) {
-            let newFg = bg ?? snap.background
+            let newFg = bg ?? Self.defaultBackground
             bg = fg
             fg = newFg
         }
@@ -211,7 +215,7 @@ final class TerminalView: NSView {
         let rect = CGRect(x: padding + CGFloat(cursor.x) * cellW,
                           y: padding + CGFloat(cursor.y) * cellH,
                           width: cellW, height: cellH)
-        let color = (cursor.color ?? snap.foreground).cgColor
+        let color = (cursor.color ?? Self.cursorColor).cgColor
         let focused = window?.isKeyWindow == true && window?.firstResponder === self
 
         switch (cursor.shape, focused) {
