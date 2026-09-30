@@ -17,6 +17,10 @@
     --blocked: #3d5a30; --unplanned: #c8d45a; --building: #b6ff4a;
     --confirmed: #3f6a34; --undeclared: #c8d45a; --unrealized: #7fe0a8; --neutral: #3f6a34;
     --warn-bg: #121a05;
+    /* planned nodes: unlit green-gray, a notch brighter when ready to build */
+    --unlit-box: #0a1308; --unlit-line: #223020; --unlit-ready-line: #48603e;
+    --unlit-ink: #5c6b54; --unlit-ready-ink: #8b9b81; --unlit-meta: #465340;
+    --unlit-bar: #33422d; --unlit-ready: #6b8261;
     --display: "IBM Plex Mono", Menlo, monospace;
     --body: "IBM Plex Mono", Menlo, monospace;
     --mono: "IBM Plex Mono", Menlo, monospace;
@@ -141,6 +145,18 @@
     padding: 4px 10px; font: 500 12px var(--body); cursor: pointer;
   }
   button.ghost:hover { border-color: var(--accent); color: var(--bright); }
+  button.ghost[disabled] { opacity: .45; cursor: not-allowed; border-color: var(--line); color: var(--ink); }
+  .change { margin: 12px 0 4px; }
+  .change textarea {
+    display: block; width: 100%; min-height: 54px; max-height: 180px; resize: vertical; margin: 0;
+    background: var(--code); color: var(--ink); border: 1px solid var(--line); border-radius: 4px;
+    padding: 7px 9px; font: 12.5px/1.45 var(--mono); outline: none;
+  }
+  .change textarea::placeholder { color: var(--muted); opacity: .8; }
+  .change textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .change textarea[disabled] { opacity: .5; }
+  .change .bar { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11.5px; }
+  .change .bar .muted { margin-right: auto; }
 
   /* chart */
   .node { cursor: pointer; transition: opacity .18s; }
@@ -149,12 +165,19 @@
   .node text.name { font: 600 13px var(--display); letter-spacing: .01em; fill: var(--ink); }
   .node text.meta { font: italic 11px var(--body); fill: var(--muted); }
   .node:hover rect.box { stroke: var(--accent); }
-  .node.planned rect.box { fill: var(--node-planned); stroke-dasharray: 5 4; stroke: var(--planned); filter: none; }
-  .node.planned.blocked rect.box { stroke: var(--blocked); }
+  .node.planned rect.box { fill: var(--unlit-box); stroke-dasharray: 5 4; stroke: var(--unlit-ready-line); filter: none; }
+  .node.planned.blocked rect.box { stroke: var(--unlit-line); }
+  .node.planned text.name { fill: var(--unlit-ready-ink); }
+  .node.planned.blocked text.name { fill: var(--unlit-ink); }
+  .node.planned text.meta { fill: var(--unlit-meta); }
+  .node.planned:hover rect.box, .node.planned.selected rect.box { fill: var(--soft); stroke: var(--accent); }
+  .node.planned:hover text.name, .node.planned.selected text.name { fill: var(--ink); }
+  .node.planned:hover text.meta, .node.planned.selected text.meta { fill: var(--muted); }
+  .node.planned:hover rect.bar, .node.planned.selected rect.bar { filter: brightness(1.5); }
   .node.unplanned rect.box { stroke: var(--unplanned); stroke-dasharray: 2 3; }
   .node.failing rect.box { stroke: var(--failing); }
   .node.building rect.box { stroke: var(--building); stroke-width: 1.6; }
-  .node.selected rect.box { stroke: var(--bright); stroke-width: 2; stroke-dasharray: none; }
+  .node.selected rect.box, .node.planned.selected rect.box { stroke: var(--bright); stroke-width: 2; stroke-dasharray: none; }
   .node.blast rect.box { stroke: var(--failing); stroke-width: 2; stroke-dasharray: none; }
   .node.dim, .edge.dim { opacity: .13; }
   .node.gone, .edge.gone { opacity: 0; visibility: hidden; pointer-events: none; }
@@ -243,7 +266,7 @@
     failing: ["built, tests fail", "--failing"],
     building: ["building now", "--building"],
     unplanned: ["not in any plan", "--unplanned"],
-    planned: ["planned", "--planned"],
+    planned: ["planned", "--unlit-ready"],
   };
   const KIND = {
     neutral: ["uses", "", "--neutral"],
@@ -260,7 +283,8 @@
   const blockedOf = (n) => n.blockedBy || [];
   const isBuilt = (n) => n.status !== "planned";
   const statusOf = (n) => STATUS[n.status] || [n.status, "--unproven"];
-  const colorOf = (n) => css(n.status === "planned" && blockedOf(n).length ? "--blocked" : statusOf(n)[1]);
+  // Planned nodes are unlit until built; the ones ready to build a notch brighter.
+  const colorOf = (n) => css(n.status !== "planned" ? statusOf(n)[1] : blockedOf(n).length ? "--unlit-bar" : "--unlit-ready");
   const nameOf = (id) => byId.get(id)?.name ?? id;
   const short = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
   // Plan docs are hard-wrapped; join a paragraph's lines, leave code blocks alone.
@@ -280,6 +304,10 @@
   let buildAgent = null;
   const inApp = () => Boolean(window.webkit?.messageHandlers?.g8r);
   const canBuild = () => !inApp() || Boolean(buildAgent);
+  // "Change this" goes to that same agent. Nodes with code take changes;
+  // what was typed survives redraws until it is sent.
+  const takesChanges = (n) => ["built", "proven", "unproven", "failing", "unplanned"].includes(n.status);
+  const drafts = new Map();
 
   // ---------------------------------------------------------------- layout
   // Rows follow the plan: a component sits below everything it needs. Code no
@@ -537,6 +565,17 @@
       that only talk through events in the log show up as "in the plan, not in the code".</p>` : ""}`;
   }
 
+  function changeBox(n) {
+    const off = inApp() && !buildAgent;
+    return `<div class="change" id="change">
+      <textarea id="changetext" rows="2" spellcheck="false" ${off ? "disabled" : ""}
+        placeholder="Change something in ${esc(n.name)}…">${esc(drafts.get(n.id) || "")}</textarea>
+      <div class="bar"><span class="muted">${off ? "Start claude or codex in a shell first."
+        : buildAgent ? `⌘↩ sends it to ${esc(buildAgent)}` : "⌘↩ sends it to your agent"}</span>
+        <button class="ghost" id="changesend" ${off ? "disabled" : ""}>Send</button></div>
+    </div>`;
+  }
+
   function detail(n) {
     const out = M.edges.filter((e) => e.from === n.id), inc = M.edges.filter((e) => e.to === n.id);
     const [label] = statusOf(n);
@@ -548,6 +587,7 @@
     return `
       <h2>${esc(n.name)}<span class="pill" style="background:${colorOf(n)}">${planned ? (ready ? "ready to build" : "waiting") : esc(label)}</span></h2>
       <div class="muted">${n.doc ? esc(docTitle(n.doc)) + (n.section ? " · " + esc(n.section.heading) : "") : "No plan mentions this code"}</div>
+      ${takesChanges(n) ? changeBox(n) : ""}
       <p>${esc(n.summary)}</p>
       ${planned ? `
         <p>${ready ? "Everything it needs is built." : "Waiting on " + blockedOf(n).map((b) => esc(nameOf(b))).join(", ") + "."}
@@ -588,6 +628,8 @@
     if (!M) return;
     const n = state.selected && byId.get(state.selected);
     const panel = $("panel");
+    const typing = document.activeElement?.id === "changetext" && panel.dataset.showing === (state.selected || "")
+      ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     const keep = panel.dataset.showing === (state.selected || "") ? panel.scrollTop : 0;
     panel.innerHTML = n ? detail(n) : overview();
     panel.dataset.showing = state.selected || "";
@@ -599,6 +641,27 @@
     const show = () => { $("promptbox").hidden = false; };
     $("showprompt")?.addEventListener("click", show);
     $("build")?.addEventListener("click", () => { if (!bridge("build", { component: n.id })) show(); });
+    const box = $("changetext");
+    if (box) {
+      if (typing) { box.focus(); box.setSelectionRange(...typing); }
+      const send = () => {
+        const text = box.value.trim();
+        if (!text) { box.focus(); return; }
+        if (!bridge("change", { component: n.id, text })) {
+          say("Open this map in the g8r app to send changes to an agent.");
+          return;
+        }
+        drafts.delete(n.id);
+        box.value = "";
+        say("Sending…");
+      };
+      box.addEventListener("input", () => drafts.set(n.id, box.value));
+      box.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); send(); }
+        if (ev.key === "Escape") { ev.stopPropagation(); box.blur(); }
+      });
+      $("changesend").addEventListener("click", send);
+    }
     $("copy")?.addEventListener("click", (ev) => {
       navigator.clipboard?.writeText(n.prompt);
       ev.target.textContent = "Copied";

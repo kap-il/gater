@@ -54,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         mapController.onBuild = { [weak self] component in self?.build(component) }
         mapController.onRunTests = { [weak self] in self?.runTests() }
+        mapController.onChange = { [weak self] component, text in self?.requestChange(component, text: text) }
         windowController.addMap(mapController)
         windowController.showWindow(nil)
 
@@ -243,6 +244,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             mapController.setBusy("Couldn't make the first commit: \(error)")
         }
+    }
+
+    /// "Change this" on a built node: types the request into the agent the
+    /// user wired up, if its pane is open and the agent still runs there,
+    /// and shows that pane. A busy agent queues it.
+    private func requestChange(_ component: String, text: String) {
+        guard let map = mapController.map else { return mapController.setBusy("The map isn't measured yet.") }
+        guard let agent = wiredAgent.agent, let id = wiredAgent.pane, let pane = paneManager.pane(id: id),
+              pane.session.isRunning,
+              // At a shell's prompt the agent has exited; other panes run it under `-c`.
+              pane.role != .shell || pane.session.hasForegroundJob
+        else { return mapController.setBusy(ChangeRequest.missing) }
+        let prompt = ChangeRequest.prompt(for: component, in: map, text: text)
+        guard !prompt.isEmpty else { return }
+        let queued = wiredAgent.busy
+        pane.inject(text: prompt)
+        windowController.showPane(id: id)
+        record(G8rEvent(kind: ChangeRequest.eventKind, extra: [
+            "component": .string(component), "pane": .string(id), "text": .string(text),
+        ]))
+        mapController.setBusy(ChangeRequest.sent(to: agent, pane: id, queued: queued))
     }
 
     /// "Run tests": the configured test_command in the code root, where

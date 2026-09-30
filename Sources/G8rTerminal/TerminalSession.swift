@@ -55,6 +55,15 @@ public final class TerminalSession {
 
     public var isRunning: Bool { exitStatus == nil }
 
+    /// Something other than the pane's own shell has the terminal: a
+    /// program the user started at an interactive shell's prompt. Only an
+    /// interactive shell with job control gives programs their own group,
+    /// so this is always false for a pane started with `-c`.
+    public var hasForegroundJob: Bool {
+        guard isRunning, let group = process.foregroundProcessGroup else { return false }
+        return group != process.pid
+    }
+
     /// Coalesces a burst of PTY reads into one redraw per main-queue turn.
     private func scheduleDisplay() {
         displayLock.lock()

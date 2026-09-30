@@ -355,6 +355,7 @@ New kinds in `.g8r/events.jsonl`, beside `pane_opened`, `pane_closed`,
 | `build_needs_human` | `component`, `reason` | clickbuild |
 | `tests_ran` | `passed`, `failed`, `exit`, `command` | evidence |
 | `agent_started` | `pane`, `agent` | an agent shim, through `g8r-hook agent-started` |
+| `change_requested` | `component`, `pane`, `text` | the app, when the map's change box sends a request to the wired agent |
 
 Hook events from a build session carry `component` as well as `pane`.
 
@@ -370,9 +371,10 @@ browser, where the bridge is missing and clicks fall back to showing text.
 | page → app | `{type: "openFile", component, path}` | show this file |
 | page → app | `{type: "runTests"}` | run the tests, then refresh |
 | page → app | `{type: "refresh"}` | measure again |
+| page → app | `{type: "change", component, text}` | type this change request, with the node's plan around it (`ChangeRequest.prompt`), into the wired agent's pane and show that pane. With no wired agent, or its pane closed or back at the shell prompt, the status line says "Start claude or codex in a shell first."; a busy agent gets it queued |
 | app → page | `window.g8r.setMap(map)` | draw this map, keeping the selection |
 | app → page | `window.g8r.setBusy(text or null)` | show or clear a status line |
-| app → page | `window.g8r.setBuildAgent("claude" or "codex" or null)` | the agent Build runs; null turns Build off in the app and says "Start claude or codex in a shell to build." A browser, with no bridge, keeps Build on to show the prompt |
+| app → page | `window.g8r.setBuildAgent("claude" or "codex" or null)` | the agent Build runs, and change requests go to; null turns Build and the change box off in the app and says "Start claude or codex in a shell to build." A browser, with no bridge, keeps Build on to show the prompt |
 
 Page to app messages go through `window.webkit.messageHandlers.g8r`.
 
@@ -879,6 +881,7 @@ final class MapViewController: NSViewController {
     init(planRoot: String)
     var onBuild: ((_ component: String) -> Void)?
     var onRunTests: (() -> Void)?
+    var onChange: ((_ component: String, _ text: String) -> Void)?
     func refresh()
     func setBusy(_ text: String?)
 }
@@ -886,6 +889,34 @@ final class MapViewController: NSViewController {
 
 Clicking a file opens it in a window, with the lines of the component's
 symbols tinted.
+
+Planned nodes are drawn unlit: a gray-green box, dimmed text and a muted
+bar, the ones ready to build a notch brighter than the blocked ones. Built
+nodes keep their colour. Hover and selection light a planned node up.
+
+**Change this.** A node with code (built, proven, unproven, failing or
+unplanned) has a text box under its header. Send (or ⌘↩) posts `change`;
+the app types `ChangeRequest.prompt` into the wired agent's pane (the
+Agent contract's `WiredAgent`) with `inject(text:submit:)`, shows that
+pane and records `change_requested`. The agent must still be running
+there: its pane open and, for a shell, something other than the shell in
+the foreground. If it hasn't gone idle since it was last given something
+(`WiredAgent.busy`, from the pane's events), the request is still sent,
+since both agents queue typed input, and the status line says "queued".
+
+```swift
+// Sources/G8rCore/Build/ChangeRequest.swift
+public enum ChangeRequest {
+    public static let eventKind: String   // "change_requested"
+    public static let missing: String     // "Start claude or codex in a shell first."
+    public static func accepts(_ status: NodeStatus) -> Bool
+    /// The user's words, then the node: name and id, its plan section
+    /// (trimmed), done-when, file paths (capped), what it needs and what
+    /// needs it, and a line asking to stay inside those files.
+    public static func prompt(for id: String, in map: LivingMap, text: String) -> String
+    public static func sent(to agent: Agent, pane: String, queued: Bool) -> String
+}
+```
 
 The viewer starts from `planmap/index.html`, moved and changed to read the
 map contract above. It keeps what the prototype does: layered layout,

@@ -145,6 +145,14 @@ public final class PTYProcess {
         exitSource?.cancel()
     }
 
+    /// The terminal's foreground process group, or nil once the PTY is
+    /// gone. An interactive shell at its prompt is its own foreground
+    /// group; a program it runs gets a group of its own.
+    public var foregroundProcessGroup: pid_t? {
+        let group = tcgetpgrp(fd)
+        return group > 0 ? group : nil
+    }
+
     public func start() {
         let read = DispatchSource.makeReadSource(fileDescriptor: fd, queue: readQueue)
         read.setEventHandler { [weak self] in self?.drain() }

@@ -341,6 +341,16 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         paneManager.close(pane)
     }
 
+    /// Brings a pane forward and gives it the keyboard: its tab, or its tile.
+    func showPane(id: String) {
+        let index = tabView.indexOfTabViewItem(withIdentifier: id)
+        if index != NSNotFound {
+            tabView.selectTabViewItem(at: index)
+        } else if let tile = tiles[id] {
+            window?.makeFirstResponder(tile.pane.view)
+        }
+    }
+
     /// ⌘1…⌘9: tabs first, then delegate tiles top to bottom.
     func selectPane(at index: Int) {
         if index < tabView.numberOfTabViewItems {
