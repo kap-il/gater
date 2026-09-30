@@ -35,10 +35,17 @@ final class AgentTests: XCTestCase {
 
     // MARK: - Launch
 
-    func testClaudeCodeLaunchesAreTodays() {
+    func testClaudeCodeLaunchesCarryItsHooksInSettings() throws {
         let build = Agent.claudeCode.launch(command: "claude", name: "build-x", prompt: "It's here", hookBinary: "/h")
-        XCTAssertEqual(build.command, #"claude --name 'build-x' 'It'\''s here'"#)
+        let settings = HookInstaller.flagSettings(hookBinary: "/h")
+        XCTAssertEqual(build.command, "claude --name 'build-x' --settings \(Agent.shellQuote(settings)) 'It'\\''s here'")
         XCTAssertEqual(build.idle, .stopEvent)
+        let json = try JSONDecoder().decode(JSONValue.self, from: Data(settings.utf8))
+        XCTAssertEqual(json.value(atPath: "hooks.PostToolUse")?.arrayValue?.count, 2)
+        XCTAssertEqual(json.value(atPath: "hooks.Stop")?.arrayValue?.count, 1)
+        XCTAssertTrue(settings.contains(#""command":"'/h'""#), settings)
+        XCTAssertEqual(Agent.claudeCode.launch(command: "claude", name: "d", prompt: nil, hookBinary: nil).command,
+                       "claude --name 'd'", "without g8r-hook, only the name")
         let delegate = Agent.claudeCode.launch(command: "/usr/local/bin/claude --model opus", name: "delegate-a",
                                                prompt: nil, hookBinary: nil)
         XCTAssertEqual(delegate.command, "/usr/local/bin/claude --model opus --name 'delegate-a'")
@@ -76,7 +83,12 @@ final class AgentTests: XCTestCase {
         XCTAssertEqual(launch.command, #"codex -c 'notify=["/it'\''s/g8r-hook", "codex-notify"]'"#)
     }
 
-    // MARK: - Installing into a worktree
+    func testWiringIsWhatLaunchesPass() {
+        XCTAssertEqual(Agent.claudeCode.wiring(hookBinary: "/h"), ["--settings", HookInstaller.flagSettings(hookBinary: "/h")])
+        XCTAssertEqual(Agent.codex.wiring(hookBinary: "/h"), ["-c", #"notify=["/h", "codex-notify"]"#])
+    }
+
+    // MARK: - Cleaning a worktree
 
     private func worktree() throws -> String {
         try GitWorktree.ensure(delegate: "auth", repoRoot: repo)
@@ -86,14 +98,14 @@ final class AgentTests: XCTestCase {
         try GitWorktree.git(["status", "--porcelain", "--untracked-files=all"], in: dir).output
     }
 
-    func testClaudeCodeInstallsItsHooksAndUninstallsThemAlone() throws {
+    func testClaudeCodeUninstallsAnOldInstallAlone() throws {
         let tree = try worktree()
         let settings = URL(fileURLWithPath: tree).appendingPathComponent(".claude/settings.local.json")
         try FileManager.default.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
         try #"{"model": "opus", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "say done"}]}]}}"#
             .write(to: settings, atomically: true, encoding: .utf8)
 
-        try Agent.claudeCode.install(into: tree, hookBinary: "/x/g8r-hook")
+        try HookInstaller.install(into: tree, config: .init(hookBinary: "/x/g8r-hook"))
         var json = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: settings))
         XCTAssertNotNil(json.value(atPath: "hooks.PostToolUse"))
         XCTAssertEqual(json.value(atPath: "hooks.Stop")?.arrayValue?.count, 2)
@@ -110,18 +122,18 @@ final class AgentTests: XCTestCase {
 
     func testUninstallingWhatWasOnlyG8rsRemovesTheFile() throws {
         let tree = try worktree()
-        try Agent.claudeCode.install(into: tree, hookBinary: "/x/g8r-hook")
+        try HookInstaller.install(into: tree, config: .init(hookBinary: "/x/g8r-hook"))
         try Agent.claudeCode.uninstall(from: tree)
         XCTAssertFalse(FileManager.default.fileExists(atPath: tree + "/.claude/settings.local.json"))
         XCTAssertNoThrow(try Agent.claudeCode.uninstall(from: tree), "nothing to take out")
     }
 
-    func testCodexInstallsNothing() throws {
+    func testCodexUninstallsNothing() throws {
         let tree = try worktree()
-        let before = try FileManager.default.contentsOfDirectory(atPath: tree).sorted()
-        try Agent.codex.install(into: tree, hookBinary: "/x/g8r-hook")
-        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: tree).sorted(), before)
+        try HookInstaller.install(into: tree, config: .init(hookBinary: "/x/g8r-hook"))
+        let before = try String(contentsOfFile: tree + "/.claude/settings.local.json", encoding: .utf8)
         try Agent.codex.uninstall(from: tree)
+        XCTAssertEqual(try String(contentsOfFile: tree + "/.claude/settings.local.json", encoding: .utf8), before)
         XCTAssertEqual(try status(tree), "")
     }
 

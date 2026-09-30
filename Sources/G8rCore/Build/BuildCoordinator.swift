@@ -18,6 +18,8 @@ public struct BuildLaunch: Equatable {
     /// command exiting says so instead, and ends the pane's session, so
     /// there is nothing left to type a failure into.
     public var idleOnExit: Bool
+    /// The agent the session runs.
+    public var agent: Agent
 
     public static func pane(for component: String) -> String { "build-\(component)" }
 
@@ -32,8 +34,9 @@ public struct BuildLaunch: Equatable {
 /// Where build sessions run: the app's panes, or a test's stand-in.
 public protocol BuildHost: AnyObject {
     /// Opens a pane in `launch.worktree` running `launch.command` with
-    /// `launch.environment`, after installing the hooks and, when the user
-    /// asked for it, trusting the worktree.
+    /// `launch.environment`, after trusting the worktree for `launch.agent`
+    /// when the user asked for it. The command carries the agent's wiring;
+    /// nothing is installed in the worktree.
     func open(_ launch: BuildLaunch) throws
     /// Types `text` into the pane and submits it.
     func tell(_ text: String, pane: String)
@@ -55,6 +58,8 @@ public final class BuildCoordinator {
         case reserved(String)
         case noCommits(String)
         case setupFailed(String, output: String)
+        /// Nobody has started an agent in a pane since the app opened.
+        case noAgent
 
         public var description: String {
             switch self {
@@ -66,6 +71,7 @@ public final class BuildCoordinator {
             case let .reserved(id): return "\(id) is the name of g8r's integration worktree; rename the component."
             case let .noCommits(root): return "\(root) has no commits to branch from."
             case let .setupFailed(id, output): return "worktree_setup failed for \(id):\n\(output)"
+            case .noAgent: return WiredAgent.missing
             }
         }
     }
@@ -86,9 +92,14 @@ public final class BuildCoordinator {
     }
 
     public let planRoot: String
-    private let agent: Agent
-    private let agentCommand: String
+    /// The agent sessions run: the one last started in a pane
+    /// (`WiredAgent`). With none, `build` refuses.
+    public var agent: Agent?
+    /// What runs it; nil for `agent.command()`, the program or
+    /// `G8R_AGENT_COMMAND`.
+    public var agentCommand: String?
     private let hookBinary: String?
+    private let skills: AgentSkills?
     private weak var host: BuildHost?
     private let record: (G8rEvent) -> Void
     private let scanner: SymbolScanning?
@@ -99,17 +110,18 @@ public final class BuildCoordinator {
 
     /// - Parameters:
     ///   - agent: which agent `agentCommand` runs, which decides its flags
-    ///     and how its going idle is heard.
-    ///   - agentCommand: what `Agent.command(environment:)` gave.
+    ///     and how its going idle is heard. Nil until one is wired.
+    ///   - agentCommand: what runs it; nil for `Agent.command(environment:)`.
     ///   - hookBinary: `g8r-hook`'s path, for agents told about it on the
     ///     command line (Codex's notify).
+    ///   - skills: the skills each session is given (`AgentSkills`).
     ///   - scanner: reads the signatures of what a node needs; nil leaves
     ///     them out of the prompt.
     ///   - runner: a runner in the given directory.
     ///   - background, main: where checks and merges run, and where their
     ///     results are handled. Both run at once by default.
-    public init(planRoot: String, agent: Agent = .default, agentCommand: String, hookBinary: String? = nil,
-                host: BuildHost,
+    public init(planRoot: String, agent: Agent? = nil, agentCommand: String? = nil, hookBinary: String? = nil,
+                skills: AgentSkills? = nil, host: BuildHost,
                 record: @escaping (G8rEvent) -> Void, scanner: SymbolScanning? = nil,
                 runner: @escaping (String) -> CommandRunner = { ProcessRunner.runner(in: $0) },
                 background: @escaping (@escaping () -> Void) -> Void = { $0() },
@@ -118,6 +130,7 @@ public final class BuildCoordinator {
         self.agent = agent
         self.agentCommand = agentCommand
         self.hookBinary = hookBinary
+        self.skills = skills
         self.host = host
         self.record = record
         self.scanner = scanner
@@ -141,6 +154,7 @@ public final class BuildCoordinator {
     @discardableResult
     public func build(_ component: String, in map: LivingMap) throws -> BuildLaunch {
         if let refusal = Self.refusal(for: component, in: map) { throw refusal }
+        guard let agent else { throw BuildError.noAgent }
         guard open[component] == nil else { throw BuildError.alreadyBuilding(component) }
         guard let base = base() else { throw BuildError.noCommits(planRoot) }
 
@@ -163,12 +177,13 @@ public final class BuildCoordinator {
         } ?? [:]
         let prompt = PromptComposer.prompt(for: component, in: map, interfaces: interfaces, base: base)
         let pane = BuildLaunch.pane(for: component)
-        let command = agent.launch(command: agentCommand, name: pane, prompt: prompt, hookBinary: hookBinary)
+        let command = agent.launch(command: agentCommand ?? agent.command(), name: pane, prompt: prompt,
+                                   hookBinary: hookBinary, skills: skills)
         let launch = BuildLaunch(component: component, pane: pane, worktree: worktree,
                                  branch: GitWorktree.branch(forDelegate: component), base: base,
                                  prompt: prompt, command: command.command,
                                  environment: ["G8R_PANE_ID": pane, "G8R_COMPONENT": component],
-                                 idleOnExit: command.idleOnExit)
+                                 idleOnExit: command.idleOnExit, agent: agent)
 
         try host?.open(launch)
         open[component] = Open(session: BuildSession(component: component), launch: launch,

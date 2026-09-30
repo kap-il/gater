@@ -25,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mapController: MapViewController!
     private var buildLauncher: BuildLauncher?
     private var testsRunning = false
+    /// The agent last started through a shim since launch; Build uses it.
+    private var wiredAgent = WiredAgent(since: Date())
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = buildMenu()
@@ -148,6 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func record(_ event: G8rEvent) {
         let stored = (try? eventLog?.append(event)) ?? event
         windowController?.eventFeed.append(stored)
+        noteWiredAgent(stored)
         buildLauncher?.handle(stored)
         // A build starting, ending or needing a person changes the map.
         if stored.kind?.hasPrefix("build_") == true { mapController?.noteEvent(stored) }
@@ -160,6 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let bus = EventBus(socketPath: socketPath, eventLog: eventLog, onEvent: { [weak self] event in
             DispatchQueue.main.async {
                 self?.windowController?.eventFeed.append(event)
+                self?.noteWiredAgent(event)
                 self?.mapController?.noteEvent(event)
                 self?.buildLauncher?.handle(event)
             }
@@ -174,6 +178,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 "text": .string("couldn't listen on \(socketPath): \(error)"),
             ]))
         }
+    }
+
+    /// An agent started by hand in a pane becomes the one Build uses.
+    private func noteWiredAgent(_ event: G8rEvent) {
+        guard wiredAgent.note(event) else { return }
+        paneManager?.wiredAgent = wiredAgent.agent
+        buildLauncher?.agent = wiredAgent.agent
+        mapController?.setBuildAgent(wiredAgent.agent)
     }
 
     // MARK: - The map's buttons

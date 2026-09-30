@@ -3,13 +3,13 @@ import Foundation
 /// The coding agent a session runs: Claude Code or OpenAI's Codex CLI.
 ///
 /// Everything g8r needs to know about an agent is answered here: how to
-/// start an interactive session, how g8r hears that it went idle, what to
-/// install in a worktree so it reports to g8r, how to trust a worktree,
-/// and how to ask it one question with a structured answer. Nothing else
-/// in g8r names an agent's executable or its files.
+/// start an interactive session, the arguments that make it report to g8r,
+/// how g8r hears that it went idle, how to trust a worktree, and how to ask
+/// it one question with a structured answer. Nothing else in g8r names an
+/// agent's executable or its files.
 public enum Agent: String, CaseIterable, Equatable, Sendable {
-    /// Claude Code, `claude`. Hooks in `.claude/settings.local.json` report
-    /// edits, commands and each stop.
+    /// Claude Code, `claude`. Hooks passed with `--settings` report edits,
+    /// commands and each stop; nothing is written to the worktree.
     case claudeCode = "claude"
     /// Codex CLI, `codex`. Its `notify` program reports each finished turn;
     /// g8r sets it per launch with `-c`, so nothing is written to the
@@ -76,25 +76,34 @@ public enum Agent: String, CaseIterable, Equatable, Sendable {
     ///
     /// `command` is what `command(environment:)` gave. When its program is
     /// this agent's (by name, wherever it lives), it gets the agent's flags:
-    /// `claude --name <name>`, or `codex -c 'notify=[…]'` so each finished
-    /// turn runs `g8r-hook codex-notify`. Anything else is run as it is,
-    /// with the prompt as its last argument; nothing reports its going idle
-    /// but its exit.
+    /// `claude --name <name> --settings '<g8r's hooks>'`, or
+    /// `codex -c 'notify=[…]'` so each finished turn runs
+    /// `g8r-hook codex-notify`. Anything else is run as it is, with the
+    /// prompt as its last argument; nothing reports its going idle but its
+    /// exit.
     ///
-    /// - Parameter hookBinary: the absolute path of `g8r-hook`. Codex needs
-    ///   it to report turns; without it, a Codex session is idle on exit.
-    public func launch(command: String, name: String, prompt: String?, hookBinary: String?) -> Launch {
+    /// - Parameter hookBinary: the absolute path of `g8r-hook`, which
+    ///   `wiring` passes to the agent. Without it, Claude Code reports
+    ///   nothing but still names its session, and a Codex session is idle
+    ///   on exit.
+    /// - Parameter skills: the skills to give the session (`AgentSkills`);
+    ///   nil gives none.
+    public func launch(command: String, name: String, prompt: String?, hookBinary: String?,
+                       skills: AgentSkills? = nil) -> Launch {
         let program = command.split(separator: " ").first.map { ($0 as NSString).lastPathComponent }
         let quotedPrompt = prompt.map { " " + Self.shellQuote($0) } ?? ""
+        let wired = hookBinary.map {
+            wiring(hookBinary: $0, skills: skills).map { " " + Self.shellWord($0) }.joined()
+        } ?? ""
         switch self {
         case .claudeCode where program == self.program:
-            return Launch(command: "\(command) --name \(Self.shellQuote(name))\(quotedPrompt)", idle: .stopEvent)
+            return Launch(command: "\(command) --name \(Self.shellQuote(name))\(wired)\(quotedPrompt)",
+                          idle: .stopEvent)
         case .codex where program == self.program:
             // Codex has no flag that names a session at launch; the pane's
             // G8R_PANE_ID says which session a turn belongs to.
-            guard let hookBinary else { break }
-            let notify = "notify=" + Self.tomlArray([hookBinary, Self.codexNotifyArgument])
-            return Launch(command: "\(command) -c \(Self.shellQuote(notify))\(quotedPrompt)", idle: .stopEvent)
+            guard hookBinary != nil else { break }
+            return Launch(command: "\(command)\(wired)\(quotedPrompt)", idle: .stopEvent)
         default:
             break
         }
@@ -108,22 +117,39 @@ public enum Agent: String, CaseIterable, Equatable, Sendable {
     /// the payload after it.
     public static let codexNotifyArgument = "codex-notify"
 
+    /// The first argument `g8r-hook` is run with by a shim that started an
+    /// agent, before the agent's name.
+    public static let startedArgument = "agent-started"
+
     // MARK: - Reporting to g8r
 
-    /// Writes into `worktree` what makes the agent report to g8r.
+    /// The arguments that make one run of the agent report to g8r, put
+    /// before the user's own. Nothing is written to the worktree or to the
+    /// agent's settings in the home folder.
     ///
-    /// Claude Code: g8r's hooks in `.claude/settings.local.json`. Codex:
-    /// nothing, since its `notify` is set on the command line; a project
-    /// `.codex/config.toml` would only be read once the worktree is
-    /// trusted, and project hooks each need approving in `/hooks`.
-    public func install(into worktree: String, hookBinary: String) throws {
+    /// - Claude Code: `--settings '<json>'`, g8r's hooks (PostToolUse on
+    ///   Edit|Write|MultiEdit and on Bash, and Stop) running `hookBinary`;
+    ///   then, with `skills`, `--plugin-dir <plugin>`.
+    /// - Codex: `-c 'notify=["<hookBinary>", "codex-notify"]'`; then, with
+    ///   `skills`, `-c 'developer_instructions="…"'` pointing it at the
+    ///   skill. A project `.codex/config.toml` would only be read once the
+    ///   worktree is trusted, and project hooks each need approving in
+    ///   `/hooks`.
+    public func wiring(hookBinary: String, skills: AgentSkills? = nil) -> [String] {
         switch self {
-        case .claudeCode: try HookInstaller.install(into: worktree, config: .init(hookBinary: hookBinary))
-        case .codex: return
+        case .claudeCode:
+            return ["--settings", HookInstaller.flagSettings(hookBinary: hookBinary)]
+                + (skills.map { ["--plugin-dir", $0.claudePlugin] } ?? [])
+        case .codex:
+            return ["-c", "notify=" + Self.tomlArray([hookBinary, Self.codexNotifyArgument])]
+                + (skills.map { ["-c", "developer_instructions=" + Self.tomlString($0.codexInstructions)] } ?? [])
         }
     }
 
-    /// Takes out what `install` wrote, leaving everything else as it was.
+    /// Takes out of `worktree` what g8r once wrote there to make the agent
+    /// report (Claude Code's hooks in `.claude/settings.local.json`, from
+    /// before `--settings`), leaving everything else as it was. Nothing for
+    /// Codex, which never had anything written.
     public func uninstall(from worktree: String) throws {
         switch self {
         case .claudeCode: try HookInstaller.uninstall(from: worktree)
@@ -157,6 +183,13 @@ public enum Agent: String, CaseIterable, Equatable, Sendable {
 
     static func shellQuote(_ s: String) -> String {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// `s` as one shell word: bare when nothing in it is special to the
+    /// shell, as flags are, otherwise quoted.
+    static func shellWord(_ s: String) -> String {
+        let plain = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./=:@%+,")
+        return !s.isEmpty && s.allSatisfy(plain.contains) ? s : shellQuote(s)
     }
 
     /// A TOML array of basic strings, which `codex -c` parses.

@@ -1,8 +1,12 @@
 import Foundation
 
-/// Installs G8r's Claude Code hooks into a worktree's
-/// `.claude/settings.local.json`. The hooks only observe: edits, shell
-/// commands, and the session going idle.
+/// G8r's Claude Code hooks. They only observe: edits, shell commands, and
+/// the session going idle.
+///
+/// g8r now passes them per session with `--settings` (see
+/// `Agent.wiring`); `flagSettings` builds that value. Installing them into
+/// a worktree's `.claude/settings.local.json` is how it used to be done,
+/// and `uninstall` takes an old install out.
 ///
 /// Each delegate works in its own worktree, and an untracked settings file
 /// doesn't follow `git worktree add`, so G8r installs into every pane's
@@ -75,6 +79,39 @@ public enum HookInstaller {
             hooks[event] = groups.isEmpty ? nil : .array(groups)
         }
         return hooks
+    }
+
+    /// G8r's hooks as settings JSON for Claude Code's `--settings`, which
+    /// adds them for one session.
+    public static func flagSettings(hookBinary: String) -> String {
+        encodeCompact(merged(existing: [:], config: Config(hookBinary: hookBinary)))
+    }
+
+    /// A `--settings` value the user gave, with g8r's hooks merged in the
+    /// way `install` merges them into a file: their own hooks and settings
+    /// are kept. Claude Code reads one `--settings`, so a shim puts this in
+    /// place of theirs rather than adding its own.
+    ///
+    /// - Parameter value: JSON text, or the path of a settings file,
+    ///   relative to `directory` unless absolute (as Claude Code reads it).
+    /// - Throws: when the value is neither a JSON object nor a readable file
+    ///   holding one; the shim then passes the user's value on untouched.
+    public static func flagSettings(merging value: String, hookBinary: String, directory: String) throws -> String {
+        var text = value
+        if (try? JSONDecoder().decode(JSONValue.self, from: Data(value.utf8)))?.objectValue == nil {
+            let url = URL(fileURLWithPath: value, relativeTo: URL(fileURLWithPath: directory, isDirectory: true))
+            text = try String(contentsOf: url, encoding: .utf8)
+        }
+        guard let existing = (try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8)))?.objectValue else {
+            throw HookInstallerError.unreadableSettings(value)
+        }
+        return encodeCompact(merged(existing: existing, config: Config(hookBinary: hookBinary)))
+    }
+
+    private static func encodeCompact(_ settings: [String: JSONValue]) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return String(decoding: (try? encoder.encode(JSONValue.object(settings))) ?? Data("{}".utf8), as: UTF8.self)
     }
 
     /// Installs (or refreshes) G8r's hooks in `directory`.

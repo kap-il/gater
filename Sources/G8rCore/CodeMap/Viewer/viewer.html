@@ -274,6 +274,12 @@
     return Boolean(h);
   };
   const say = (text) => { $("busy").textContent = text || ""; };
+  // The agent the app builds with: the one last started in one of its panes.
+  // Until there is one, Build is off in the app. A browser has no app, so its
+  // Build button only shows the prompt.
+  let buildAgent = null;
+  const inApp = () => Boolean(window.webkit?.messageHandlers?.g8r);
+  const canBuild = () => !inApp() || Boolean(buildAgent);
 
   // ---------------------------------------------------------------- layout
   // Rows follow the plan: a component sits below everything it needs. Code no
@@ -536,6 +542,7 @@
     const [label] = statusOf(n);
     const planned = n.status === "planned";
     const ready = planned && !blockedOf(n).length;
+    const wired = canBuild();
     const t = n.tests;
     const edgeList = (es, side) => es.map((e) => nodeRow(e[side], kindTag(e))).join("") || '<p class="muted">Nothing.</p>';
     return `
@@ -547,8 +554,10 @@
            Built ${nth(n.wave)} in this plan.</p>
         ${n.changes.length ? `<p>Changes <b>${n.changes.map((c) => esc(nameOf(c))).join(", ")}</b>` +
           ((n.blast || []).length ? `, which ${n.blast.map((c) => esc(nameOf(c))).join(", ")} use${n.blast.length === 1 ? "s" : ""}. Outlined in red.` : ".") + "</p>" : ""}
-        <p><button class="primary" id="build" ${ready ? "" : "disabled"}>Build this</button>
+        <p><button class="primary" id="build" ${ready && wired ? "" : "disabled"}
+             ${wired ? (buildAgent ? `title="Builds with ${esc(buildAgent)}"` : "") : 'title="Start claude or codex in a shell to build."'}>Build this</button>
            ${n.prompt ? '<button class="ghost" id="showprompt">Show the prompt</button>' : ""}</p>
+        ${ready && !wired ? '<p class="note" id="nowired">Start claude or codex in a shell to build.</p>' : ""}
         <div id="promptbox" hidden>
           ${n.prompt ? `<pre id="prompt">${esc(n.prompt)}</pre>
           <p><button class="ghost" id="copy">Copy prompt</button></p>`
@@ -682,7 +691,11 @@
     render();
     paint();
   }
-  window.g8r = { setMap, setBusy: (text) => say(text) };
+  function setBuildAgent(agent) {
+    buildAgent = agent || null;
+    render();
+  }
+  window.g8r = { setMap, setBusy: (text) => say(text), setBuildAgent };
 
   // Rows wrap to the stage's width, so a resize lays the chart out again.
   let resizeTimer = null;

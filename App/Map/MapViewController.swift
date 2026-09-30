@@ -15,6 +15,8 @@ final class MapViewController: NSViewController, WKScriptMessageHandler, WKNavig
     /// The map as last measured.
     private(set) var map: LivingMap?
     private var pageReady = false
+    /// The agent Build would run; nil keeps Build off.
+    private var buildAgent: Agent?
     private var measuring = false
     /// Another refresh was asked for while one was running.
     private var pending: Bool?
@@ -112,6 +114,14 @@ final class MapViewController: NSViewController, WKScriptMessageHandler, WKNavig
         webView.evaluateJavaScript("window.g8r.setBusy(\(arg))")
     }
 
+    /// Which agent Build runs, or none, which turns Build off and says why.
+    func setBuildAgent(_ agent: Agent?) {
+        buildAgent = agent
+        guard pageReady else { return }
+        let arg = agent.flatMap { try? String(decoding: JSONEncoder().encode($0.rawValue), as: UTF8.self) } ?? "null"
+        webView.evaluateJavaScript("window.g8r.setBuildAgent(\(arg))")
+    }
+
     /// Hook events redraw the map at most once a second; a finished test
     /// run redraws it at once.
     func noteEvent(_ event: G8rEvent) {
@@ -175,6 +185,7 @@ final class MapViewController: NSViewController, WKScriptMessageHandler, WKNavig
         switch type {
         case "ready":
             pageReady = true
+            setBuildAgent(buildAgent)
             if map == nil { refresh() } else { push() }
         case "build":
             guard let component = body["component"] as? String else { return }
