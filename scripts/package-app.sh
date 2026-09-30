@@ -25,6 +25,7 @@ for bundle in "$bin"/*.bundle; do
   cp -R "$bundle" "$app/Contents/Resources/"
 done
 cp "$root/THIRD_PARTY_NOTICES.md" "$app/Contents/Resources/"
+cp "$root/Resources/AppIcon/AppIcon.icns" "$app/Contents/Resources/"
 
 cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -33,6 +34,8 @@ cat > "$app/Contents/Info.plist" <<EOF
 <dict>
 	<key>CFBundleExecutable</key>
 	<string>G8r</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>local.g8r.G8r</string>
 	<key>CFBundleName</key>
