@@ -7,6 +7,7 @@ enum G8rMain {
     private static let delegate = AppDelegate()
 
     static func main() {
+        RetroFonts.register()
         let app = NSApplication.shared
         app.delegate = delegate
         app.setActivationPolicy(.regular)

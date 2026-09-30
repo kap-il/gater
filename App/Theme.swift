@@ -1,7 +1,9 @@
 import AppKit
+import G8rCore
 
 /// g8r's palette and type, shared with the map page: deep greens, a brass
-/// for commands, a rust red for errors, and old book faces for labels.
+/// for commands, a rust red for errors, and retro terminal faces (IBM 3270, VT323) bundled
+/// in G8rCore and registered at launch.
 enum Theme {
     static let background = hex(0x07110B)
     static let surface = hex(0x0C1A12)
@@ -19,18 +21,24 @@ enum Theme {
 
     /// Labels, tab titles, tile titles.
     static func label(_ size: CGFloat, bold: Bool = false) -> NSFont {
-        let font = first(["Hoefler Text", "Iowan Old Style"], size) ?? .systemFont(ofSize: size)
-        return bold ? NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) : font
+        // IBM 3270 has no bold; selection is shown by colour, not weight.
+        _ = bold
+        return mono(size)
     }
 
     /// Headings, used sparingly.
     static func heading(_ size: CGFloat) -> NSFont {
-        first(["Luminari", "Hoefler Text"], size) ?? .systemFont(ofSize: size, weight: .semibold)
+        first([RetroFonts.display.postScriptName, RetroFonts.body.postScriptName], size)
+            ?? .monospacedSystemFont(ofSize: size, weight: .semibold)
     }
 
-    /// Typewriter monospace for the padded event feed.
+    /// IBM 3270 monospace for the padded event feed.
     static func typewriter(_ size: CGFloat) -> NSFont {
-        first(["Courier New", "Courier"], size) ?? .monospacedSystemFont(ofSize: size, weight: .regular)
+        mono(size)
+    }
+
+    private static func mono(_ size: CGFloat) -> NSFont {
+        first([RetroFonts.body.postScriptName, "Menlo"], size) ?? .monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
     static func hex(_ v: UInt32) -> NSColor {

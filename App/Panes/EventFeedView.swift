@@ -31,8 +31,8 @@ final class EventFeedView: NSView {
         scrollView.hasVerticalScroller = true
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        let header = NSTextField(labelWithString: "Events")
-        header.font = Theme.heading(16)
+        let header = NSTextField(labelWithString: "EVENTS")
+        header.font = Theme.heading(20)
         header.textColor = Theme.brightAccent
         let rule = NSTextField(labelWithString: String(repeating: "═", count: 80))
         rule.font = Theme.typewriter(11)

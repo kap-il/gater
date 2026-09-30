@@ -74,6 +74,20 @@ public enum MapViewer {
     private static func template() throws -> String {
         guard let url = Bundle.module.url(forResource: "viewer", withExtension: "html", subdirectory: "Viewer")
         else { throw ViewerError.missingPage }
-        return try String(contentsOf: url, encoding: .utf8)
+        let page = try String(contentsOf: url, encoding: .utf8)
+        return page.replacingOccurrences(of: fontsPlaceholder, with: fontFaces())
+    }
+
+    static let fontsPlaceholder = "/*G8R_FONTS*/"
+
+    /// `@font-face` rules for the bundled fonts as data URLs, so the page
+    /// stays self-contained.
+    static func fontFaces() -> String {
+        RetroFonts.files.compactMap { file in
+            guard let url = RetroFonts.url(file), let data = try? Data(contentsOf: url) else { return nil }
+            let format = url.pathExtension == "otf" ? "opentype" : "truetype"
+            return "@font-face { font-family: \"\(file.family)\"; font-display: block; "
+                + "src: url(data:font/\(url.pathExtension);base64,\(data.base64EncodedString())) format(\"\(format)\"); }"
+        }.joined(separator: "\n")
     }
 }
