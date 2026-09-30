@@ -5,7 +5,7 @@ import G8rCore
 /// stage, in order.
 public enum StandardMap {
     /// A stage is added here when the component that makes it is merged.
-    public static var stages: [MapStage] { [Drift()] }
+    public static var stages: [MapStage] { [Drift(), Timeline()] }
 
     /// - Parameters:
     ///   - codeRoot: where to measure the code. By default the integration
