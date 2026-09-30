@@ -22,20 +22,25 @@ final class PaneManager {
     /// unless the user turned it on.
     var trustWorktrees = false
 
-    /// The agent delegates and build sessions run: `agent` in g8r.json or
-    /// .g8r/config.json, or `G8R_AGENT`.
-    let agent: Agent
+    /// The agent last started in a pane of this run, through a shim; the
+    /// app sets it from `agent_started` events. Builds need one.
+    var wiredAgent: Agent?
 
-    /// The command delegates and build sessions run. `G8R_AGENT_COMMAND`
-    /// overrides it, so the terminal can be exercised without the agent
-    /// installed.
-    let agentCommand: String
+    /// The agent New Delegate starts: the wired one, else `agent` in
+    /// g8r.json or .g8r/config.json, or `G8R_AGENT`.
+    var agent: Agent { wiredAgent ?? G8rConfig.load(repoRoot: repoRoot).agent }
+
+    /// The command delegates run. `G8R_AGENT_COMMAND` overrides it, so the
+    /// terminal can be exercised without the agent installed.
+    var agentCommand: String { agent.command() }
+
+    /// g8r's agent shims, written at launch; nil when they couldn't be.
+    private(set) var shims: AgentShims.Installed?
 
     init(repoRoot: String, record: @escaping (G8rEvent) -> Void) {
         self.repoRoot = repoRoot
         self.record = record
-        agent = G8rConfig.load(repoRoot: repoRoot).agent
-        agentCommand = agent.command()
+        installShims()
     }
 
     func pane(id: String) -> Pane? { panes.first { $0.id == id } }
@@ -47,7 +52,8 @@ final class PaneManager {
     /// "pane" in the event log, or `codex -c notify=…`. Custom commands
     /// are run as-is.
     private func agentCommand(named id: String) -> String {
-        agent.launch(command: agentCommand, name: id, prompt: nil, hookBinary: hookBinaryPath()).command
+        agent.launch(command: agentCommand, name: id, prompt: nil, hookBinary: hookBinaryPath(),
+                     skills: shims?.skills).command
     }
 
     /// "New delegate": creates `../<repo>-<name>` on `g8r/<name>` and
@@ -63,12 +69,12 @@ final class PaneManager {
     }
 
     /// A build session from the map: its worktree is already made and
-    /// set up; this trusts it if asked, installs the hooks, and starts the
-    /// launch's command there.
+    /// set up; this trusts it if asked and starts the launch's command
+    /// there, which carries the agent's wiring.
     @discardableResult
     func spawnBuild(_ launch: BuildLaunch) throws -> Pane {
         if let existing = pane(id: launch.pane) { return existing }
-        if trustWorktrees { try? agent.trustWorktree(launch.worktree, createdFrom: repoRoot) }
+        if trustWorktrees { try? launch.agent.trustWorktree(launch.worktree, createdFrom: repoRoot) }
         return try spawn(id: launch.pane, role: .build, name: launch.component, worktree: launch.worktree,
                          command: launch.command, environment: launch.environment)
     }
@@ -86,13 +92,16 @@ final class PaneManager {
     private func spawn(id: String, role: PaneRole, name: String, worktree: String, command: String?,
                        environment: [String: String] = [:]) throws -> Pane {
         var env = environment
-        if let path = pathWithHookDirectory() { env["PATH"] = path }
-        if role != .shell {
-            // Shell panes aren't tracked: without a pane id, g8r-hook
-            // stays silent for anything run in them.
-            env["G8R_PANE_ID"] = id
-            installHooks(in: worktree)
+        let path = pathWithHookDirectory()
+        if let shims {
+            env.merge(AgentShims.environment(shims, path: path)) { _, shim in shim }
+        } else {
+            env["PATH"] = path
         }
+        // Every pane is tracked, shells too, so an agent someone starts by
+        // hand reports as this pane. Only build sessions set G8R_COMPONENT.
+        env["G8R_PANE_ID"] = id
+        if role != .shell { removeOldHooks(from: worktree) }
 
         let config = LaunchConfig.loginShell(command: command, workingDirectory: worktree,
                                              extraEnvironment: env)
@@ -152,20 +161,25 @@ final class PaneManager {
         record(event)
     }
 
-    /// Writes what the agent needs into the pane's worktree so it reports
-    /// to the event bus (Claude Code's hooks; nothing for Codex, whose
-    /// notify is on its command line). Best-effort: a pane without hooks still works as a
-    /// terminal, so failures are logged rather than blocking the spawn.
-    private func installHooks(in worktree: String) {
+    /// Writes the `claude` and `codex` shims every pane finds first on
+    /// PATH. Best-effort: without them, panes still work as terminals, and
+    /// agents started by hand just don't report.
+    private func installShims() {
         guard let hook = hookBinaryPath() else {
             log(G8rEvent(kind: "hooks_error", extra: ["text": .string("g8r-hook binary not found next to G8r")]))
             return
         }
         do {
-            try agent.install(into: worktree, hookBinary: hook)
+            shims = try AgentShims.install(hookBinary: hook)
         } catch {
-            log(G8rEvent(kind: "hooks_error", extra: ["text": .string("\(worktree): \(error)")]))
+            log(G8rEvent(kind: "hooks_error", extra: ["text": .string("couldn't write the agent shims: \(error)")]))
         }
+    }
+
+    /// Sessions get their hooks on the command line now; hooks an older
+    /// g8r wrote into the worktree would report every event twice.
+    private func removeOldHooks(from worktree: String) {
+        for agent in Agent.allCases { try? agent.uninstall(from: worktree) }
     }
 
     func hookBinaryPath() -> String? {
@@ -174,15 +188,12 @@ final class PaneManager {
         return FileManager.default.isExecutableFile(atPath: path) ? path : nil
     }
 
-    /// Prepends the directory holding `g8r-hook` (built next to the app
-    /// binary) so hook commands that name it resolve.
-    private func pathWithHookDirectory() -> String? {
-        guard let exe = Bundle.main.executableURL else { return nil }
-        let dir = exe.deletingLastPathComponent().path
-        guard FileManager.default.isExecutableFile(atPath: (dir as NSString).appendingPathComponent("g8r-hook")) else {
-            return nil
-        }
+    /// The inherited PATH, with the directory holding `g8r-hook` (built
+    /// next to the app binary) in front so hook commands that name it
+    /// resolve.
+    private func pathWithHookDirectory() -> String {
         let current = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
-        return "\(dir):\(current)"
+        guard let hook = hookBinaryPath() else { return current }
+        return "\((hook as NSString).deletingLastPathComponent):\(current)"
     }
 }

@@ -15,7 +15,7 @@ final class BuildCoordinatorTests: XCTestCase {
     override func tearDownWithError() throws { shop.remove() }
 
     private func coordinator(agent: String, runner: ((String) -> CommandRunner)? = nil) -> BuildCoordinator {
-        let coordinator = BuildCoordinator(planRoot: shop.repo, agentCommand: agent, host: host,
+        let coordinator = BuildCoordinator(planRoot: shop.repo, agent: .claudeCode, agentCommand: agent, host: host,
                                            record: { [unowned self] in events.append($0) },
                                            scanner: BuildStubScanner(),
                                            runner: runner ?? { ProcessRunner.runner(in: $0) })
@@ -46,6 +46,21 @@ final class BuildCoordinatorTests: XCTestCase {
         XCTAssertTrue(host.opened.isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(atPath: shop.worktree("pay")), "no worktree for a refusal")
         XCTAssertTrue(events.isEmpty)
+    }
+
+    func testWithNoWiredAgentBuildIsRefused() throws {
+        let builds = BuildCoordinator(planRoot: shop.repo, host: host, record: { [unowned self] in events.append($0) })
+        XCTAssertThrowsError(try builds.build("cart", in: try shop.map())) { error in
+            XCTAssertEqual(error as? BuildCoordinator.BuildError, .noAgent)
+            XCTAssertEqual("\(error)", "Start claude or codex in a shell to build.")
+        }
+        XCTAssertTrue(host.opened.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: shop.worktree("cart")), "no worktree for a refusal")
+        XCTAssertTrue(events.isEmpty)
+
+        builds.agent = .claudeCode
+        builds.agentCommand = "claude"
+        XCTAssertEqual(try builds.build("cart", in: try shop.map()).agent, .claudeCode, "once wired, it builds")
     }
 
     func testOnlyPlannedNodesBuild() throws {

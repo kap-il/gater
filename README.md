@@ -38,6 +38,8 @@ open planmap/index.html
 
 - **Terminal.** A native AppKit terminal on [libghostty-vt](https://github.com/ghostty-org/ghostty), with CoreText rendering, selection, scrollback and mouse reporting.
 - **Panes.** One session in the repo itself, plus one per worktree. New Delegate creates `../<repo>-<name>` on branch `g8r/<name>` and starts the agent there (`claude --name delegate-<name>`, or `codex`).
+- **Agents.** Type `claude` or `codex` (with any arguments) in any g8r pane, the shell g8r opens on included; g8r wires it up. Shims first on the pane's `PATH` start the real program with g8r's hooks (`--settings`) or Codex's `notify` (`-c`), so the session shows up in the event feed ("claude started in shell 1") and the log. Build uses the agent you last started this way; until you start one, Build is off.
+- **Plan skill.** Agents started in g8r know how to write plans g8r reads: Claude Code gets the `g8r-plan` skill as a session plugin, and Codex is pointed at the same file.
 - **Event log.** Claude Code's hooks report each session's edits, shell commands and stops to `.g8r/events.jsonl`; Codex's `notify` reports each finished turn. They only observe; nothing blocks a tool call.
 - **Libraries, not yet wired into the app:** the tree-sitter symbol engine (TypeScript, TSX, JavaScript), the language-server reference engine, and dependency-ordered integration into `g8r/integration` with a test run after each merge.
 
@@ -45,7 +47,7 @@ open planmap/index.html
 
 - macOS on Apple Silicon, Xcode / Swift 6
 - [Zig](https://ziglang.org) 0.16 (builds libghostty-vt)
-- An agent: [Claude Code](https://code.claude.com) (the default) or OpenAI's [Codex CLI](https://github.com/openai/codex) (`"agent": "codex"` in `g8r.json`, or `G8R_AGENT=codex`)
+- An agent: [Claude Code](https://code.claude.com) or OpenAI's [Codex CLI](https://github.com/openai/codex). Type `claude` or `codex` in g8r's shell; g8r wires it up
 - Optional: [Bun](https://bun.sh), to install TypeScript 7 for the reference engine
 
 ## Setup
@@ -89,7 +91,7 @@ Delegate boxes collapse from their title bar. **G8r → Auto-trust Delegate Work
 { "test_command": "npm test", "agent": "codex" }
 ```
 
-`test_command` is used by the integrator after each merge; `G8R_TEST_COMMAND` overrides it. `agent` is `claude` (the default) or `codex`; `G8R_AGENT` overrides it. `g8r.json` at the repo root takes the same keys and is tracked; `.g8r/config.json` overrides it.
+`test_command` is used by the integrator after each merge; `G8R_TEST_COMMAND` overrides it. `agent` is optional: `claude` (the default) or `codex`, the agent g8r starts on its own to read free-form plans (and for New Delegate before you have started one). It doesn't choose the build agent, which is whichever you last started in a pane. `G8R_AGENT` overrides it. `g8r.json` at the repo root takes the same keys and is tracked; `.g8r/config.json` overrides it.
 
 ## What g8r writes
 
@@ -98,9 +100,10 @@ In the folder you open (excluded via `.git/info/exclude` in a git repository, so
 | Path | |
 |---|---|
 | `.g8r/events.jsonl` | the event log |
-| `.claude/settings.local.json` | g8r's hooks, merged with yours, in each Claude Code session's worktree |
 
-Next to it: `../<repo>-<name>` worktrees. In your home folder: `~/.g8r/` (event socket, tools) and, only with auto-trust on, trust entries in `~/.claude.json`. For Codex g8r writes nothing: its `notify` is passed per launch with `-c`, and `~/.codex/config.toml` is never touched.
+Hooks are passed to each Claude Code session with `--settings`; hooks an older g8r wrote to a worktree's `.claude/settings.local.json` are taken out when a session opens there.
+
+Next to it: `../<repo>-<name>` worktrees. In your home folder: `~/.g8r/` (event socket, tools, and `~/.g8r/shims/`: the `claude` and `codex` shims, a zsh startup file that keeps them first on `PATH`, and the plan skill) and, only with auto-trust on, trust entries in `~/.claude.json`. `~/.claude` and `~/.codex` are never written: Codex's `notify` and instructions are passed per launch with `-c`. Passing `-c developer_instructions` replaces any your Codex config sets, for that session.
 
 ## Repository layout
 
@@ -110,7 +113,7 @@ Next to it: `../<repo>-<name>` worktrees. In your home folder: `~/.g8r/` (event 
 | `Sources/G8rSymbols` | tree-sitter symbol engine, diffs, reference engine |
 | `Sources/G8rTerminal` | libghostty-vt terminal core, PTY, sessions |
 | `Sources/G8rPTY` | forkpty/exec in C |
-| `Sources/g8r-hook` | the hook CLI: Claude Code's hooks and Codex's notify |
+| `Sources/g8r-hook` | the hook CLI: Claude Code's hooks, Codex's notify, and the agent shims |
 | `App/` | the macOS app: terminal view, panes, event feed |
 | `planmap/` | the map prototype and the plan |
 | `Vendor/ghostty` | Ghostty submodule (pinned) + build output |
@@ -125,7 +128,7 @@ The language-server tests need TypeScript 7 in `~/.g8r/tools` and skip otherwise
 
 | Variable | |
 |---|---|
-| `G8R_AGENT` | `claude` or `codex`; overrides `agent` in `g8r.json` and `.g8r/config.json` |
+| `G8R_AGENT` | `claude` or `codex`; overrides `agent` in `g8r.json` and `.g8r/config.json` (plan reading and New Delegate, not Build) |
 | `G8R_AGENT_COMMAND` | run something other than `claude` / `codex` in session panes; a program named `claude` or `codex` still gets that agent's flags |
 | `G8R_COLLECTOR` | event socket path (default `~/.g8r/g8r.sock`) |
 | `G8R_TSC` | explicit TypeScript 7 binary |

@@ -125,7 +125,7 @@ overrides it key by key, and environment variables override both.
 | `test_command` | none | `G8R_TEST_COMMAND` |
 | `worktree_setup` | none; run in each new worktree, with `G8R_PLAN_ROOT` set, to put back what git doesn't carry, such as build output | |
 | `ignore` | none; globs of paths the map leaves out | |
-| `agent` | `claude`; or `codex`. Which agent runs sessions and reads free-form plans. A name g8r doesn't know leaves the default | `G8R_AGENT` |
+| `agent` | `claude`; or `codex`. Which agent reads free-form plans, and which New Delegate starts before an agent is wired. It does **not** choose the build agent (see Agent). A name g8r doesn't know leaves the default | `G8R_AGENT` |
 
 `G8R_AGENT_COMMAND` replaces the agent's program in session panes (a
 different path, extra flags, or a stand-in script for tests). A command
@@ -134,8 +134,51 @@ anything else is run with the prompt as its last argument.
 
 ### Agent
 
-A session runs one of two agents, chosen by `agent` in `g8r.json`. Nothing
-outside `Sources/G8rCore/Agents/` names an agent's program or files.
+A session runs one of two agents. Nothing outside `Sources/G8rCore/Agents/`
+names an agent's program or files.
+
+**Wiring by hand.** At launch g8r writes `~/.g8r/shims/<hash of g8r-hook's
+path>/`: a `bin/` with one plain `/bin/sh` shim per `Agent` case (`claude`,
+`codex`), a `zsh/.zshenv`, and the skills. Every pane g8r opens, shells
+included, gets `G8R_PANE_ID` (`shell-N` for shells; only build sessions also
+get `G8R_COMPONENT`) and `bin/` first on `PATH`. A login shell's startup
+files can push it back (macOS's `path_helper`, a `.zshrc` prepending
+`~/.local/bin`), so a zsh pane starts with `ZDOTDIR` at g8r's `.zshenv`,
+which puts the user's `ZDOTDIR` back, reads their `.zshenv`, and puts the
+shims first again just before the first prompt. Other shells only get the
+inherited `PATH`.
+
+A shim finds the real program, the first on `PATH` outside
+`~/.g8r/shims/` and not the shim itself however its directory is spelled,
+and fails with exit 127 and a clear message when there is none. Without
+`G8R_PANE_ID` it `exec`s the real program untouched. In a pane it runs
+`g8r-hook agent-started <agent>` in the background (not in a build
+session, which has `build_started`), then `exec`s the real program with
+`wiring` before the user's own arguments. Claude Code reads one
+`--settings`: when the user passes their own (`--settings x` or
+`--settings=x`, before any `--`), `g8r-hook claude-settings <x>` merges
+g8r's hooks into it (a file, relative to the working directory, or JSON)
+and the shim passes the result in its place; if that fails, the user's
+value goes on untouched and g8r hears nothing from that session. The user's
+own `-c notify=…` for Codex comes after g8r's and wins, likewise.
+
+**Build agent.** Build uses the agent most recently started through a
+shim in a pane of this run of the app (`agent_started` since launch;
+`WiredAgent`). Until there is one, Build is off on the map with "Start
+claude or codex in a shell to build.", and `BuildCoordinator.build` throws
+`BuildError.noAgent`. Neither `agent` in `g8r.json` nor `G8R_AGENT`
+chooses it.
+
+**Skills.** Every session g8r wires (shims and build sessions) is given
+the `g8r-plan` skill (`Sources/G8rCore/Resources/Skills/g8r-plan/SKILL.md`),
+which teaches this doc's plan format; a test parses its example plan with
+`PlanDocParser`. Claude Code loads it as a plugin (`--plugin-dir`,
+`.claude-plugin/plugin.json` plus `skills/g8r-plan/SKILL.md`). Codex has no
+per-session skills directory (its skills come from its own folders and
+installed plugins), so it gets `-c developer_instructions="…"` telling it
+to read the skill's file before writing a plan doc; that replaces any
+`developer_instructions` in the user's Codex config for the session.
+Nothing is written to the repo, `~/.claude` or `~/.codex`.
 
 ```swift
 // Sources/G8rCore/Agents/
@@ -148,9 +191,12 @@ public enum Agent: String, CaseIterable {
 
     public enum IdleSignal { case stopEvent, paneExit }
     public struct Launch { public var command: String; public var idle: IdleSignal }
-    public func launch(command: String, name: String, prompt: String?, hookBinary: String?) -> Launch
+    public func launch(command: String, name: String, prompt: String?, hookBinary: String?,
+                       skills: AgentSkills? = nil) -> Launch
+    /// The arguments that make one run report to g8r; launches and shims both use them.
+    public func wiring(hookBinary: String, skills: AgentSkills? = nil) -> [String]
 
-    public func install(into worktree: String, hookBinary: String) throws
+    /// Takes out hooks an older g8r wrote into .claude/settings.local.json.
     public func uninstall(from worktree: String) throws
     public func trustWorktree(_ worktree: String, createdFrom repoRoot: String, home: String) throws
 
@@ -158,14 +204,30 @@ public enum Agent: String, CaseIterable {
     public func oneShot(prompt: String, schema: String, schemaFile: String) -> OneShot
     public func oneShotAnswer(from run: (status: Int32, output: String)) throws -> JSONValue
 }
+
+public enum AgentShims {
+    public struct Installed { public var bin: String; public var zdotdir: String; public var skills: AgentSkills }
+    public static func install(hookBinary: String, home: String) throws -> Installed
+    public static func environment(_ installed: Installed, path: String, base: [String: String]) -> [String: String]
+    public static func script(for agent: Agent, bin: String, hookBinary: String, skills: AgentSkills?, home: String) -> String
+}
+
+public struct AgentSkills { public var claudePlugin: String; public var planSkill: String }
+
+public struct WiredAgent {
+    public init(since: Date)
+    public var agent: Agent? { get }
+    public mutating func note(_ event: G8rEvent) -> Bool
+}
 ```
 
 | | Claude Code | Codex |
 |---|---|---|
-| Session | `claude --name <pane> '<prompt>'` | `codex -c 'notify=["<g8r-hook>", "codex-notify"]' '<prompt>'`; Codex has no flag that names a session |
+| Wiring | `--settings '<g8r's hooks as JSON>' --plugin-dir <plugin>` | `-c 'notify=["<g8r-hook>", "codex-notify"]' -c 'developer_instructions="…"'` |
+| Session | `claude --name <pane> <wiring> '<prompt>'` | `codex <wiring> '<prompt>'`; Codex has no flag that names a session |
 | Idle | Stop hook → `g8r-hook` → `stop` | `notify` on `agent-turn-complete` → `g8r-hook codex-notify <payload>` → `stop` |
 | Reported | edits, commands, stops | stops only; the session ends when its pane closes |
-| Installed in the worktree | hooks in `.claude/settings.local.json`, excluded from git | nothing; `notify` is set per launch, and `~/.codex` is never written |
+| Installed in the worktree | nothing; hooks come with `--settings`, and an older g8r's hooks in `.claude/settings.local.json` are taken out when a session opens there | nothing; `notify` is set per launch, and `~/.codex` is never written |
 | Trust (auto-trust on) | `~/.claude.json`, only when the repo is trusted | nothing: Codex trusts a linked worktree through its main repository |
 | Plan extraction | `claude -p <prompt> --output-format json --json-schema <schema>`; answer under `structured_output` | `codex exec --json --ephemeral --sandbox read-only --output-schema <file> <prompt>`; answer is the last `agent_message` item's text. The schema is strict: every property required |
 
@@ -292,6 +354,7 @@ New kinds in `.g8r/events.jsonl`, beside `pane_opened`, `pane_closed`,
 | `build_merged` | `component`, `commit` | clickbuild |
 | `build_needs_human` | `component`, `reason` | clickbuild |
 | `tests_ran` | `passed`, `failed`, `exit`, `command` | evidence |
+| `agent_started` | `pane`, `agent` | an agent shim, through `g8r-hook agent-started` |
 
 Hook events from a build session carry `component` as well as `pane`.
 
@@ -309,6 +372,7 @@ browser, where the bridge is missing and clicks fall back to showing text.
 | page → app | `{type: "refresh"}` | measure again |
 | app → page | `window.g8r.setMap(map)` | draw this map, keeping the selection |
 | app → page | `window.g8r.setBusy(text or null)` | show or clear a status line |
+| app → page | `window.g8r.setBuildAgent("claude" or "codex" or null)` | the agent Build runs; null turns Build off in the app and says "Start claude or codex in a shell to build." A browser, with no bridge, keeps Build on to show the prompt |
 
 Page to app messages go through `window.webkit.messageHandlers.g8r`.
 
@@ -960,6 +1024,22 @@ Lets a build session run Claude Code or OpenAI's Codex CLI, through the one
   worktree gone. Claude Code's launches, hooks, trust and extraction are
   what they were, and every earlier test passes. Both agents' launch
   commands, installers, notify payloads and extraction output have tests.
+
+### shims: Agent shims
+
+Makes an agent a person starts by hand in any g8r pane report to g8r, and
+builds use the agent they last started, as the Agent contract says.
+
+- Needs: agents, hooks, clickbuild
+- Changes: agents, hooks, clickbuild, panes, graphview
+- Code: `Sources/G8rCore/Agents/AgentShims.swift`, `Sources/G8rCore/Agents/AgentSkills.swift`, `Sources/G8rCore/Agents/WiredAgent.swift`, `Sources/G8rCore/Resources/Skills/`
+- Done when: the generated shims pass `sh -n`; run on a made-up PATH they
+  exec the real program with the wiring and the user's arguments untouched,
+  pass straight through without `G8R_PANE_ID`, fail clearly with no real
+  program, skip their own directory however often it is on PATH, and log
+  `agent_started`; a user's `--settings` is merged; Build is refused with
+  no wired agent, the last started agent wins, and one from an earlier run
+  doesn't count; the plan skill's example parses into two components.
 
 ## Retired
 

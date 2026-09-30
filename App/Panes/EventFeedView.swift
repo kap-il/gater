@@ -85,6 +85,7 @@ final class EventFeedView: NSView {
         case "edit": return Theme.brightAccent
         case "pane_opened", "pane_closed", "session_start": return Theme.muted
         case "stop": return Theme.olive
+        case "agent_started": return Theme.brightAccent
         default: return Theme.ink
         }
     }
@@ -101,6 +102,10 @@ final class EventFeedView: NSView {
             detail = event["description"]?.stringValue ?? event["command"]?.stringValue ?? ""
         case "pane_opened":
             detail = event["worktree"]?.stringValue.map { ($0 as NSString).lastPathComponent } ?? ""
+        case "agent_started":
+            // "claude started in shell 1"
+            let agent = event["agent"]?.stringValue ?? "an agent"
+            detail = "\(agent) started in \(pane.replacingOccurrences(of: "-", with: " "))"
         default:
             detail = event["text"]?.stringValue ?? event["tool_name"]?.stringValue ?? ""
         }

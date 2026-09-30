@@ -25,7 +25,7 @@ let package = Package(
         .target(
             name: "G8rCore",
             path: "Sources/G8rCore",
-            resources: [.copy("CodeMap/Viewer"), .copy("Resources/Fonts")]
+            resources: [.copy("CodeMap/Viewer"), .copy("Resources/Fonts"), .copy("Resources/Skills")]
         ),
         .executableTarget(
             name: "g8r-hook",

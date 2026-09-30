@@ -1,7 +1,8 @@
 import Foundation
 
-/// The pure logic behind g8r-hook: a Claude Code hook payload, or a Codex
-/// `notify` payload, plus the pane it came from → the events to log. Kept
+/// The pure logic behind g8r-hook: a Claude Code hook payload, a Codex
+/// `notify` payload, or a shim saying it started an agent, plus the pane it
+/// came from → the events to log. Kept
 /// out of the executable so it's testable.
 ///
 /// Observation only: nothing here blocks or changes a tool call.
@@ -23,8 +24,14 @@ public enum HookProcessor {
     /// What g8r-hook was run with, after its own name. Claude Code's hooks
     /// run it bare and pipe the payload in; Codex's `notify` runs it as
     /// `g8r-hook codex-notify <payload>`, the payload as the last argument.
-    /// Returns nil when there is no payload to read.
+    /// A shim that started an agent runs it as `g8r-hook agent-started
+    /// <agent>`, with nothing to read. Returns nil when there is no payload
+    /// to read.
     public static func process(arguments: [String], stdin: () -> Data, env: Environment) -> [G8rEvent]? {
+        if arguments.first == Agent.startedArgument {
+            guard arguments.count > 1, let agent = Agent(name: arguments[1]) else { return nil }
+            return [agentStarted(agent, env: env)]
+        }
         if arguments.first == Agent.codexNotifyArgument {
             guard arguments.count > 1, let last = arguments.last,
                   let payload = (try? JSONDecoder().decode(JSONValue.self, from: Data(last.utf8)))?.objectValue
@@ -35,6 +42,17 @@ public enum HookProcessor {
             return nil
         }
         return process(payload: payload, env: env)
+    }
+
+    /// `agent_started`: someone started `agent` in a pane, through g8r's
+    /// shim, so it reports to g8r from now on.
+    public static func agentStarted(_ agent: Agent, env: Environment) -> G8rEvent {
+        var fields: [String: JSONValue] = [
+            "kind": .string("agent_started"), "agent": .string(agent.rawValue), "pane": .string(env.paneId),
+            "ts": .string(ISO8601DateFormatter().string(from: env.now)),
+        ]
+        if let component = env.component, !component.isEmpty { fields["component"] = .string(component) }
+        return G8rEvent(fields: fields)
     }
 
     /// Codex's `notify` payload. It says only that a turn finished

@@ -16,8 +16,10 @@ public struct G8rConfig: Equatable {
     public var worktreeSetup: String?
     /// Globs of paths the map leaves out.
     public var ignore: [String]
-    /// The agent sessions run and plans are read with. A name g8r doesn't
-    /// know leaves the default.
+    /// The agent g8r starts on its own: the one free-form plans are read
+    /// with, and New Delegate's before an agent is wired. It doesn't choose
+    /// the build agent, which is the one last started in a pane
+    /// (`WiredAgent`). A name g8r doesn't know leaves the default.
     public var agent: Agent
 
     public init(plans: [String] = G8rConfig.defaultPlans, buildCommand: String? = nil,

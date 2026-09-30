@@ -14,11 +14,17 @@ final class BuildLauncher: BuildHost {
         self.paneManager = paneManager
         self.record = record
         coordinator = BuildCoordinator(
-            planRoot: planRoot, agent: paneManager.agent, agentCommand: paneManager.agentCommand,
-            hookBinary: paneManager.hookBinaryPath(), host: self, record: record,
+            planRoot: planRoot, hookBinary: paneManager.hookBinaryPath(), skills: paneManager.shims?.skills,
+            host: self, record: record,
             scanner: TreeSitterScanner(),
             background: { DispatchQueue.global(qos: .userInitiated).async(execute: $0) },
             main: { DispatchQueue.main.async(execute: $0) })
+    }
+
+    /// The agent builds run: the one last started in a pane. Nil refuses.
+    var agent: Agent? {
+        get { coordinator.agent }
+        set { coordinator.agent = newValue }
     }
 
     func build(_ component: String, in map: LivingMap) throws {
