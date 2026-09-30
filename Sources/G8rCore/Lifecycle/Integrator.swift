@@ -72,28 +72,15 @@ public struct Integrator {
     }
 
     /// Runs the project's tests on the integration worktree; nil when no
-    /// test command is configured.
+    /// test command is configured. The run is a `TestRunner` run, so its
+    /// log and report land in the repo's `.g8r/` for the map to read.
     public func runTests(command: String?, timeout: TimeInterval = 600) -> TestRun? {
         guard let command, !command.isEmpty else { return nil }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-lc", command]
-        process.currentDirectoryURL = URL(fileURLWithPath: worktree)
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        do { try process.run() } catch { return TestRun(passed: false, tail: "couldn't run \(command): \(error)") }
-        let deadline = Date().addingTimeInterval(timeout)
-        var output = Data()
-        let reader = pipe.fileHandleForReading
-        while process.isRunning && Date() < deadline {
-            output.append(reader.availableData)
-        }
-        if process.isRunning { process.terminate() }
-        output.append(reader.readDataToEndOfFile())
-        let lines = String(decoding: output, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false)
+        let run = TestRunner.runKeepingOutput(command: command, codeRoot: worktree, planRoot: repoRoot,
+                                              timeout: timeout)
+        let lines = run.output.split(separator: "\n", omittingEmptySubsequences: false)
         let tail = lines.suffix(15).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        return TestRun(passed: process.terminationStatus == 0 && Date() < deadline, tail: tail)
+        return TestRun(passed: run.report.exit == 0, tail: tail)
     }
 
     /// Diffstat + diff of a worktree's work since its base, capped.
