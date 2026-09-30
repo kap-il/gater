@@ -24,7 +24,8 @@ let package = Package(
     targets: [
         .target(
             name: "G8rCore",
-            path: "Sources/G8rCore"
+            path: "Sources/G8rCore",
+            resources: [.copy("CodeMap/Viewer")]
         ),
         .executableTarget(
             name: "g8r-hook",
@@ -84,7 +85,7 @@ package.targets += [
     ),
     .executableTarget(
         name: "G8r",
-        dependencies: ["G8rCore", "G8rTerminal"],
+        dependencies: ["G8rCore", "G8rSymbols", "G8rTerminal"],
         path: "App"
     ),
     .testTarget(
