@@ -59,7 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A plain shell in the repo. No agent starts on its own: sessions
         // begin from the map's Build button or from New Delegate.
         do {
-            try paneManager.spawnShell()
+            try paneManager.spawnShell(banner: true)
         } catch {
             showError("Couldn't start a shell", error)
         }

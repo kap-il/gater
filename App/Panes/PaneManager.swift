@@ -67,11 +67,14 @@ final class PaneManager {
                          command: launch.command, environment: launch.environment)
     }
 
+    /// A plain shell. With `banner`, it plays the startup banner first
+    /// (unless G8R_NO_BANNER is set), then becomes the interactive shell.
     @discardableResult
-    func spawnShell(in directory: String? = nil) throws -> Pane {
+    func spawnShell(in directory: String? = nil, banner: Bool = false) throws -> Pane {
         shellCount += 1
+        let skip = !(ProcessInfo.processInfo.environment["G8R_NO_BANNER"] ?? "").isEmpty
         return try spawn(id: "shell-\(shellCount)", role: .shell, name: "shell \(shellCount)",
-                         worktree: directory ?? repoRoot, command: nil)
+                         worktree: directory ?? repoRoot, command: banner && !skip ? StartupBanner.command : nil)
     }
 
     private func spawn(id: String, role: PaneRole, name: String, worktree: String, command: String?,
