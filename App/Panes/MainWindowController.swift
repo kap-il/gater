@@ -37,10 +37,10 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 860),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable],
                               backing: .buffered, defer: false)
-        window.title = "G8r — \((paneManager.repoRoot as NSString).lastPathComponent)"
         window.setFrameAutosaveName("G8rMainWindow")
         window.minSize = NSSize(width: 700, height: 400)
         super.init(window: window)
+        showRoot(paneManager.repoRoot)
 
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = Theme.background
@@ -100,6 +100,22 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
     var selectedPane: Pane? {
         if let id = focusedPaneId, let pane = paneManager.pane(id: id) { return pane }
         return (tabView.selectedTabViewItem?.identifier as? String).flatMap(paneManager.pane(id:))
+    }
+
+    /// The pane whose working folder the map follows: the one with
+    /// keyboard focus, else the selected tab's. Nil while the map's tab is
+    /// shown and no pane has focus.
+    var activePane: Pane? {
+        if let responder = window?.firstResponder as? NSView,
+           let pane = paneManager.panes.first(where: { responder.isDescendant(of: $0.view) }) {
+            return pane
+        }
+        return (tabView.selectedTabViewItem?.identifier as? String).flatMap(paneManager.pane(id:))
+    }
+
+    /// Names the project root in the title bar.
+    func showRoot(_ root: String) {
+        window?.title = "G8r — \((root as NSString).lastPathComponent)"
     }
 
     // MARK: - The map

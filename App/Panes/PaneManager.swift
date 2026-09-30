@@ -5,7 +5,10 @@ import G8rTerminal
 /// Creates panes with the right command, cwd, and G8R_* environment, and
 /// logs what humans type into delegate panes.
 final class PaneManager {
-    let repoRoot: String
+    /// The project root: where New Shell and New Delegate start, and whose
+    /// config says which agent to run. The app moves it with the active
+    /// shell; panes already open stay where they are.
+    var repoRoot: String
     /// Appends to the event log (and the live feed); owned by the app.
     private let record: (G8rEvent) -> Void
     private(set) var panes: [Pane] = []

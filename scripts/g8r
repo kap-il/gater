@@ -1,7 +1,8 @@
 #!/bin/sh
 # g8r [path]: opens the g8r app on the git repository you're in, or on the
-# one containing `path`. A folder outside any git repository is opened as it
-# is, with history and builds off until `git init`.
+# one containing `path`. Outside any git repository the app opens the
+# nearest folder with a plan, else the folder as it is, with history and
+# builds off until `git init`.
 #
 # Each folder gets its own app window and its own event socket, so two
 # can be open at once without their hooks crossing.

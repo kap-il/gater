@@ -7,7 +7,8 @@ import WebKit
 /// testable about it live in `MapViewer`; this only wires WebKit, timers
 /// and windows to it.
 final class MapViewController: NSViewController, WKScriptMessageHandler, WKNavigationDelegate {
-    let planRoot: String
+    /// The project root the map measures; `setPlanRoot` moves it.
+    private(set) var planRoot: String
     var onBuild: ((_ component: String) -> Void)?
     var onRunTests: (() -> Void)?
 
@@ -59,6 +60,20 @@ final class MapViewController: NSViewController, WKScriptMessageHandler, WKNavig
 
     deinit { watchTimer?.invalidate() }
 
+    /// Measures a different root: the map, the watched plan docs and the
+    /// idle note all start over there. The page keeps showing the old map
+    /// until the new one is measured.
+    func setPlanRoot(_ root: String) {
+        guard root != planRoot else { return }
+        planRoot = root
+        map = nil
+        readMtimes = [:]
+        seenMtimes = [:]
+        // As at launch: measured at once, and the watcher lets a model read
+        // a free-form plan once it has been still for a check.
+        refresh()
+    }
+
     // MARK: - Refresh
 
     /// Measures the map again off the main thread, then redraws it.
@@ -77,12 +92,19 @@ final class MapViewController: NSViewController, WKScriptMessageHandler, WKNavig
         let times = currentMtimes()
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Result { try StandardMap.build(planRoot: root, extract: extract) }
-            DispatchQueue.main.async { self?.finished(result, readTimes: extract ? times : nil) }
+            DispatchQueue.main.async { self?.finished(result, root: root, readTimes: extract ? times : nil) }
         }
     }
 
-    private func finished(_ result: Result<LivingMap, Error>, readTimes: [String: Date]?) {
+    private func finished(_ result: Result<LivingMap, Error>, root: String, readTimes: [String: Date]?) {
         measuring = false
+        // The root moved while this measured: measure the new one instead.
+        if root != planRoot {
+            let extract = pending ?? false
+            pending = nil
+            refresh(extract: extract)
+            return
+        }
         switch result {
         case .success(let map):
             self.map = map

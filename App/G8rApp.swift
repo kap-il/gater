@@ -1,5 +1,6 @@
 import AppKit
 import G8rCore
+import G8rTerminal
 
 @main
 enum G8rMain {
@@ -23,7 +24,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var paneManager: PaneManager!
     private var windowController: MainWindowController!
     private var mapController: MapViewController!
-    private var buildLauncher: BuildLauncher?
+    /// The folder the map, Build, Run tests and the log work on; it moves
+    /// with the active shell.
+    private var projectRoot: ProjectRoot!
+    private var followTimer: Timer?
+    /// A launcher per root builds were started from. The current root's
+    /// starts new builds; the others see their open sessions through.
+    private var buildLaunchers: [String: BuildLauncher] = [:]
     private var testsRunning = false
     /// The agent last started through a shim since launch; Build uses it.
     private var wiredAgent = WiredAgent(since: Date())
@@ -36,33 +43,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let logPath = URL(fileURLWithPath: repoRoot).appendingPathComponent(".g8r/events.jsonl")
-        // Runtime state is local, never committed.
-        try? GitWorktree.exclude(pattern: "/.g8r/", comment: "G8r runtime state", in: repoRoot)
-        do {
-            eventLog = try EventLog(path: logPath)
-        } catch {
-            showError("Couldn't open \(logPath.path)", error)
+        eventLog = openEventLog(in: repoRoot) { [weak self] path, error in
+            self?.showError("Couldn't open \(path)", error)
         }
+        projectRoot = ProjectRoot(path: repoRoot)
+        projectRoot.onChange = { [weak self] event in self?.moveRoot(event) }
 
         paneManager = PaneManager(repoRoot: repoRoot) { [weak self] event in self?.record(event) }
         paneManager.trustWorktrees = autoTrustWorktrees
         windowController = MainWindowController(paneManager: paneManager)
         mapController = MapViewController(planRoot: repoRoot)
-        buildLauncher = BuildLauncher(paneManager: paneManager, planRoot: repoRoot) { [weak self] event in
-            self?.record(event)
-        }
         mapController.onBuild = { [weak self] component in self?.build(component) }
         mapController.onRunTests = { [weak self] in self?.runTests() }
         windowController.addMap(mapController)
         windowController.showWindow(nil)
 
         startEventBus()
+        startFollowing()
 
         // A plain shell in the repo. No agent starts on its own: sessions
         // begin from the map's Build button or from New Delegate.
         do {
-            try paneManager.spawnShell(banner: true)
+            let shell = try paneManager.spawnShell(banner: true)
+            // G8R_DEBUG_CD=<folder>: `cd` there in the first shell after a
+            // second, to exercise the map following it without typing.
+            if let folder = ProcessInfo.processInfo.environment["G8R_DEBUG_CD"], !folder.isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    shell.inject(text: "cd \(LaunchConfig.shellQuote(folder))")
+                }
+            }
         } catch {
             showError("Couldn't start a shell", error)
         }
@@ -143,7 +152,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) {
-        buildLauncher?.closeAll()
+        followTimer?.invalidate()
+        buildLaunchers.values.forEach { $0.closeAll() }
         paneManager?.closeAll()
         eventBus?.stop()
         eventLog?.close()
@@ -156,7 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let stored = (try? eventLog?.append(event)) ?? event
         windowController?.eventFeed.append(stored)
         noteWiredAgent(stored)
-        buildLauncher?.handle(stored)
+        buildLaunchers.values.forEach { $0.handle(stored) }
         // A build starting, ending or needing a person changes the map.
         if stored.kind?.hasPrefix("build_") == true { mapController?.noteEvent(stored) }
     }
@@ -170,7 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.windowController?.eventFeed.append(event)
                 self?.noteWiredAgent(event)
                 self?.mapController?.noteEvent(event)
-                self?.buildLauncher?.handle(event)
+                self?.buildLaunchers.values.forEach { $0.handle(event) }
             }
         })
         do {
@@ -189,7 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func noteWiredAgent(_ event: G8rEvent) {
         guard wiredAgent.note(event) else { return }
         paneManager?.wiredAgent = wiredAgent.agent
-        buildLauncher?.agent = wiredAgent.agent
+        buildLaunchers.values.forEach { $0.agent = wiredAgent.agent }
         mapController?.setBuildAgent(wiredAgent.agent)
     }
 
@@ -198,12 +208,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// "Build this": a session of its own for the node, in a worktree
     /// branched from `g8r/integration`.
     private func build(_ component: String) {
-        guard let map = mapController.map, let buildLauncher else {
+        guard let map = mapController.map else {
             mapController.setBusy("The map isn't measured yet.")
             return
         }
         do {
-            try buildLauncher.build(component, in: map)
+            try launcher(for: projectRoot.path).build(component, in: map)
             mapController.setBusy(nil)
         } catch BuildCoordinator.BuildError.noCommits {
             offerFirstCommit(then: component, in: map)
@@ -317,14 +327,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return current == "/" ? nil : current
     }
 
-    /// The repository's root for a folder inside one, else the folder
-    /// itself; nil when it isn't a folder.
+    /// The project root for a folder (`ProjectRoot.resolve`); nil when it
+    /// isn't a folder.
     private func root(of path: String) -> String? {
-        if let root = GitWorktree.repoRoot(containing: path) { return root }
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue
         else { return nil }
-        return URL(fileURLWithPath: path).standardizedFileURL.path
+        return ProjectRoot.resolve(path)
+    }
+
+    // MARK: - Following the active shell
+
+    /// Once a second, while g8r is the active app, reads the active shell's
+    /// working folder; `ProjectRoot` moves the root when that folder
+    /// belongs to another project.
+    private func startFollowing() {
+        followTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            self?.followActiveShell()
+        }
+    }
+
+    /// Only a shell moves the root: delegate and build panes run in g8r's
+    /// own worktrees.
+    private func followActiveShell() {
+        guard NSApp.isActive, let pane = windowController?.activePane, pane.role == .shell,
+              let folder = pane.session.process.workingDirectory else { return }
+        projectRoot.follow(folder: folder, pane: pane.id)
+    }
+
+    /// The root moved: the log, the map, the title, New Shell, New Delegate
+    /// and Build all move with it. Build sessions already open keep their
+    /// own root, and the wired agent stays wired.
+    private func moveRoot(_ event: G8rEvent) {
+        let root = projectRoot.path
+        // The old log says where the root went; the new one where it came from.
+        record(event)
+        let log = openEventLog(in: root) { [weak self] path, error in
+            self?.windowController?.eventFeed.append(G8rEvent(kind: "log_error", extra: [
+                "text": .string("couldn't open \(path): \(error)"),
+            ]))
+        }
+        _ = try? log?.append(event)
+        let old = eventLog
+        eventLog = log
+        eventBus?.setEventLog(log)
+        old?.close()
+
+        paneManager.repoRoot = root
+        windowController.showRoot(root)
+        mapController.setPlanRoot(root)
+        // Launchers for other roots are kept only while they have a session.
+        buildLaunchers = buildLaunchers.filter { $0.value.hasOpenSessions }
+    }
+
+    /// `<root>/.g8r/events.jsonl`, with `.g8r/` kept out of git.
+    private func openEventLog(in root: String, onError: (String, Error) -> Void) -> EventLog? {
+        let path = URL(fileURLWithPath: root).appendingPathComponent(".g8r/events.jsonl")
+        // Runtime state is local, never committed.
+        try? GitWorktree.exclude(pattern: "/.g8r/", comment: "G8r runtime state", in: root)
+        do {
+            return try EventLog(path: path)
+        } catch {
+            onError(path.path, error)
+            return nil
+        }
+    }
+
+    /// The launcher that builds in `root`, made on first use.
+    private func launcher(for root: String) -> BuildLauncher {
+        if let existing = buildLaunchers[root] { return existing }
+        let launcher = BuildLauncher(paneManager: paneManager, planRoot: root) { [weak self] event in
+            self?.record(event)
+        }
+        launcher.agent = wiredAgent.agent
+        buildLaunchers[root] = launcher
+        return launcher
     }
 
     // MARK: - Actions
@@ -340,9 +417,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// In the active shell's working folder, as a terminal's new tab
+    /// opens; beside a delegate or build pane, in its worktree; with the
+    /// map shown, in the project root.
     @objc private func newShell(_ sender: Any?) {
+        let pane = windowController.activePane
+        let directory = pane?.role == .shell ? pane?.session.process.workingDirectory ?? pane?.worktree : pane?.worktree
         do {
-            try paneManager.spawnShell(in: windowController.selectedPane?.worktree)
+            try paneManager.spawnShell(in: directory)
         } catch {
             showError("Couldn't start a shell", error)
         }

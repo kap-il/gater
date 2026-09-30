@@ -88,4 +88,35 @@ final class EventBusTests: XCTestCase {
         try UnixSocketClient(path: path).send(line: #"{"kind":"edit","ts":"t"}"#)
         wait(for: [received], timeout: 2)
     }
+
+    /// When the project root moves, the bus writes to the new root's log;
+    /// the old log keeps what came before.
+    func testSwappingTheLogMovesLaterEvents() throws {
+        let socketPath = tempSocketPath()
+        defer { unlink(socketPath) }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("g8r-tests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let firstPath = dir.appendingPathComponent("a/events.jsonl")
+        let secondPath = dir.appendingPathComponent("b/events.jsonl")
+        let first = try EventLog(path: firstPath)
+        let second = try EventLog(path: secondPath)
+
+        var arrived = expectation(description: "first event")
+        let bus = EventBus(socketPath: socketPath, eventLog: first) { _ in arrived.fulfill() }
+        try bus.start()
+        defer { bus.stop() }
+        Thread.sleep(forTimeInterval: 0.05)
+
+        try UnixSocketClient(path: socketPath).send(line: #"{"kind":"edit","ts":"t","pane":"one"}"#)
+        wait(for: [arrived], timeout: 2)
+        XCTAssertTrue(bus.setEventLog(second) === first)
+        arrived = expectation(description: "second event")
+        try UnixSocketClient(path: socketPath).send(line: #"{"kind":"edit","ts":"t","pane":"two"}"#)
+        wait(for: [arrived], timeout: 2)
+        first.close()
+        second.close()
+
+        XCTAssertEqual(try EventLog.replay(path: firstPath).map(\.pane), ["one"])
+        XCTAssertEqual(try EventLog.replay(path: secondPath).map(\.pane), ["two"])
+    }
 }

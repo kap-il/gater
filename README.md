@@ -66,7 +66,9 @@ bun add typescript@^7
 
 ## Running
 
-g8r opens any folder. Inside a git repository it opens the repository's root; any other folder is opened as it is, with the map, shell and event log working and history and builds off until `git init`. Building from the map needs a commit to branch from: in a repository with none, or a folder with no git, g8r offers to initialize git (if needed) and commit only the plan docs and `g8r.json`.
+g8r opens any folder. Inside a git repository it opens the repository's root; outside one, the nearest folder above it (below your home folder) with a `PLAN.md`, `plans/`, `docs/plans/` or `g8r.json`; otherwise the folder as it is, with the map, shell and event log working and history and builds off until `git init`.
+
+The map follows you. `cd` into another project in the shell you're typing in, or click into a shell that is in one, and within a second the map, the window title, Build, Run tests and the event log switch to that project. `cd` within a project changes nothing, and delegate and build panes never move it. Build sessions already running carry on in the project they started in. ⌘T opens a new shell in the folder the current shell is in. Building from the map needs a commit to branch from: in a repository with none, or a folder with no git, g8r offers to initialize git (if needed) and commit only the plan docs and `g8r.json`.
 
 ```sh
 cd path/to/your-folder
@@ -76,7 +78,7 @@ swift run --package-path path/to/g8r G8r
 | Shortcut | |
 |---|---|
 | ⌘⇧D | New delegate (asks for a name) |
-| ⌘T | New shell |
+| ⌘T | New shell, in the current shell's folder |
 | ⌘W | Close the focused pane |
 | ⌘1–⌘9 | Focus tabs, then delegate boxes |
 | ⌘C / ⌘V | Copy selection / paste |
@@ -95,7 +97,7 @@ Delegate boxes collapse from their title bar. **G8r → Auto-trust Delegate Work
 
 ## What g8r writes
 
-In the folder you open (excluded via `.git/info/exclude` in a git repository, so `git status` stays clean):
+In the project root, the folder you open and each one the map follows you to (excluded via `.git/info/exclude` in a git repository, so `git status` stays clean):
 
 | Path | |
 |---|---|
