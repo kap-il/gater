@@ -56,10 +56,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         startEventBus()
 
+        // A plain shell in the repo. No agent starts on its own: sessions
+        // begin from the map's Build button or from New Delegate.
         do {
-            try paneManager.spawnOrchestrator()
+            try paneManager.spawnShell()
         } catch {
-            showError("Couldn't start the orchestrator pane", error)
+            showError("Couldn't start a shell", error)
         }
         windowController.showMap()
         // G8R_DEBUG_DELEGATES=a,b opens those delegates at launch, for

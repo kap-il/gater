@@ -4,7 +4,7 @@ import Foundation
 ///
 /// This is the pane's engine with no UI in it — TerminalView draws its
 /// snapshots and forwards input, and G8r itself drives it through
-/// `inject(text:submit:)` to wake the orchestrator.
+/// `inject(text:submit:)` to type into a session, as build checks do.
 ///
 /// Callbacks are delivered on the main queue.
 public final class TerminalSession {

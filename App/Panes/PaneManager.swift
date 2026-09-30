@@ -22,7 +22,7 @@ final class PaneManager {
     /// unless the user turned it on.
     var trustWorktrees = false
 
-    /// The command the orchestrator and delegates run. Overridable so the
+    /// The command delegates and build sessions run. Overridable so the
     /// terminal can be exercised without claude installed.
     var agentCommand = ProcessInfo.processInfo.environment["G8R_AGENT_COMMAND"] ?? "claude"
 
@@ -30,8 +30,6 @@ final class PaneManager {
         self.repoRoot = repoRoot
         self.record = record
     }
-
-    var orchestrator: Pane? { panes.first { $0.role == .orchestrator } }
 
     func pane(id: String) -> Pane? { panes.first { $0.id == id } }
 
@@ -44,13 +42,6 @@ final class PaneManager {
         let program = agentCommand.split(separator: " ").first.map { ($0 as NSString).lastPathComponent }
         guard program == "claude" else { return agentCommand }
         return "\(agentCommand) --name \(LaunchConfig.shellQuote(id))"
-    }
-
-    @discardableResult
-    func spawnOrchestrator() throws -> Pane {
-        if let existing = orchestrator { return existing }
-        return try spawn(id: "orch", role: .orchestrator, name: "orchestrator",
-                         worktree: repoRoot, command: agentCommand(named: "orch"))
     }
 
     /// "New delegate": creates `../<repo>-<name>` on `g8r/<name>` and

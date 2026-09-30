@@ -734,7 +734,7 @@ public enum MapViewer {
 ```
 
 In the app, the map is the first tab of the main area, ahead of the
-orchestrator. `MapViewController` hosts the `WKWebView`, answers the bridge
+shells. `MapViewController` hosts the `WKWebView`, answers the bridge
 messages, and redraws when any of these happen: the app starts, a plan doc
 or `g8r.json` changes on disk, hook events arrive (at most once a second), a
 test run ends, or the page asks. The map is measured off the main thread.
@@ -877,6 +877,13 @@ from the event log: a `build_started` with no `build_merged` or
 No orchestrator hands out work any more. A click on the map starts the
 session. Gone with it: the GATER/1 format, the delegation skill, commit
 trailers keyed by dish.
+
+### Orchestrator pane
+
+The app no longer starts a Claude session in the repo when it opens. It
+could change the user's own checkout with nothing but their permission
+settings in the way, and nothing handed it work any more. The app opens
+the map and a plain shell; sessions start from Build or New Delegate.
 
 ### Plan store
 

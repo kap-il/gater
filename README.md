@@ -6,10 +6,10 @@ g8r (formerly Gater) is a macOS app. It runs stock Claude Code sessions in its o
 
 ```
 ┌──────────────────────┬──────────────────┬───────────────────┐
-│ orchestrator  shell  │ delegate: auth   │  Events           │
+│ map  shell           │ build: auth      │  Events           │
 │                      │  (claude)        │  15:02 edit …     │
-│  claude              ├──────────────────┤  15:02 command …  │
-│                      │ delegate: dash   │  15:03 stop …     │
+│  living map          ├──────────────────┤  15:02 command …  │
+│                      │ build: dash      │  15:03 stop …     │
 │                      │  (claude)        │                   │
 └──────────────────────┴──────────────────┴───────────────────┘
 ```

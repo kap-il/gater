@@ -4,13 +4,13 @@ import G8rCore
 /// The one G8r window:
 ///
 ///     ┌─────────────────────┬────────────────┬──────────────┐
-///     │ [orchestrator][sh1] │ delegate: auth │ Events       │
+///     │ [map][shell 1]      │ delegate: auth │ Events       │
 ///     │                     │  (terminal)    │ 15:02 edit … │
-///     │  orchestrator       ├────────────────┤ 15:02 stop … │
+///     │  map or shell       ├────────────────┤ 15:02 stop … │
 ///     │  terminal           │ delegate: dash │              │
 ///     └─────────────────────┴────────────────┴──────────────┘
 ///
-/// Orchestrator and shells are tabs; each delegate is a tile in the middle
+/// The map and shells are tabs; each delegate is a tile in the middle
 /// column (hidden until the first delegate opens); the right column shows
 /// what the sessions are doing, and is where the map will go.
 final class MainWindowController: NSWindowController, NSTabViewDelegate {
@@ -92,7 +92,7 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
 
     static let mapTabId = "map"
 
-    /// The map is the first tab, ahead of the orchestrator.
+    /// The map is the first tab, ahead of the shells.
     func addMap(_ controller: NSViewController) {
         let item = NSTabViewItem(identifier: Self.mapTabId)
         item.label = "Map"
@@ -129,7 +129,7 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
             let index = tabView.indexOfTabViewItem(withIdentifier: pane.id)
             if index != NSNotFound { tabView.removeTabViewItem(tabView.tabViewItem(at: index)) }
         }
-        if let next = selectedPane ?? paneManager.orchestrator { window?.makeFirstResponder(next.view) }
+        window?.makeFirstResponder(selectedPane?.view ?? tabView.selectedTabViewItem?.view)
     }
 
     private func addTab(for pane: Pane) {
@@ -155,7 +155,7 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
 
         if widenColumn {
             // A delegate runs a full claude session; give its column room
-            // between the orchestrator and the feed.
+            // between the tabs and the feed.
             sideSplit.isHidden = false
             rootSplit.layoutSubtreeIfNeeded()
             let total = rootSplit.bounds.width
@@ -175,8 +175,9 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
 
     private func toggleCollapse(_ tile: PaneTileView) {
         tile.setCollapsed(!tile.isCollapsed)
-        if tile.isCollapsed, focusedPaneId == tile.pane.id, let orchestrator = paneManager.orchestrator {
-            window?.makeFirstResponder(orchestrator.view) // don't type into a hidden pane
+        if tile.isCollapsed, focusedPaneId == tile.pane.id {
+            // Don't type into a hidden pane.
+            window?.makeFirstResponder(tabView.selectedTabViewItem?.view)
         } else if !tile.isCollapsed {
             window?.makeFirstResponder(tile.pane.view)
         }

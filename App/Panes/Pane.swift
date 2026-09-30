@@ -2,8 +2,6 @@ import AppKit
 import G8rTerminal
 
 enum PaneRole: String {
-    /// Exactly one per session; runs `claude` in the repo itself.
-    case orchestrator
     /// One per worktree; runs a working `claude`.
     case delegate
     /// One per component being built from the map; ends with the build.
@@ -34,7 +32,6 @@ final class Pane {
 
     var displayTitle: String {
         switch role {
-        case .orchestrator: return "orchestrator"
         case .delegate: return "delegate: \(name)"
         case .build: return "build: \(name)"
         case .shell: return name
