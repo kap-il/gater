@@ -45,7 +45,7 @@ struct TerminalFont {
     }
 
     private static func preferredFont(size: CGFloat) -> NSFont {
-        for name in ["JetBrainsMono-Regular", "SFMono-Regular", "Menlo-Regular"] {
+        for name in ["IBMPlexMono", "JetBrainsMono-Regular", "SFMono-Regular", "Menlo-Regular"] {
             if let font = NSFont(name: name, size: size) { return font }
         }
         return NSFont.monospacedSystemFont(ofSize: size, weight: .regular)

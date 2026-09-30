@@ -83,11 +83,11 @@ public enum MapViewer {
     /// `@font-face` rules for the bundled fonts as data URLs, so the page
     /// stays self-contained.
     static func fontFaces() -> String {
-        RetroFonts.files.compactMap { file in
-            guard let url = RetroFonts.url(file), let data = try? Data(contentsOf: url) else { return nil }
-            let format = url.pathExtension == "otf" ? "opentype" : "truetype"
-            return "@font-face { font-family: \"\(file.family)\"; font-display: block; "
-                + "src: url(data:font/\(url.pathExtension);base64,\(data.base64EncodedString())) format(\"\(format)\"); }"
+        BundledFonts.webFiles.compactMap { file in
+            guard let url = BundledFonts.url(file, ext: "woff2"), let data = try? Data(contentsOf: url) else { return nil }
+            return "@font-face { font-family: \"\(BundledFonts.family)\"; font-weight: \(file.weight); "
+                + "font-style: \(file.italic ? "italic" : "normal"); font-display: block; "
+                + "src: url(data:font/woff2;base64,\(data.base64EncodedString())) format(\"woff2\"); }"
         }.joined(separator: "\n")
     }
 }

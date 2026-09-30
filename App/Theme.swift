@@ -2,7 +2,7 @@ import AppKit
 import G8rCore
 
 /// g8r's palette and type, shared with the map page: deep greens, a brass
-/// for commands, a rust red for errors, and retro terminal faces (IBM 3270, VT323) bundled
+/// for commands, a rust red for errors, and IBM Plex Mono bundled
 /// in G8rCore and registered at launch.
 enum Theme {
     static let background = hex(0x07110B)
@@ -19,26 +19,23 @@ enum Theme {
     static let brass = hex(0x8C7A3A)
     static let error = hex(0xA94A35)
 
-    /// Labels, tab titles, tile titles.
+    /// Labels, tab titles, tile titles: Plex Mono Medium, SemiBold when bold.
     static func label(_ size: CGFloat, bold: Bool = false) -> NSFont {
-        // IBM 3270 has no bold; selection is shown by colour, not weight.
-        _ = bold
-        return mono(size)
+        let file = bold ? BundledFonts.semiBold : BundledFonts.medium
+        return first([file.postScriptName, "Menlo"], size)
+            ?? .monospacedSystemFont(ofSize: size, weight: bold ? .semibold : .medium)
     }
 
-    /// Headings, used sparingly.
+    /// Headings, used sparingly: Plex Mono SemiBold.
     static func heading(_ size: CGFloat) -> NSFont {
-        first([RetroFonts.display.postScriptName, RetroFonts.body.postScriptName], size)
+        first([BundledFonts.semiBold.postScriptName, "Menlo-Bold"], size)
             ?? .monospacedSystemFont(ofSize: size, weight: .semibold)
     }
 
-    /// IBM 3270 monospace for the padded event feed.
+    /// Plex Mono Regular for the padded event feed.
     static func typewriter(_ size: CGFloat) -> NSFont {
-        mono(size)
-    }
-
-    private static func mono(_ size: CGFloat) -> NSFont {
-        first([RetroFonts.body.postScriptName, "Menlo"], size) ?? .monospacedSystemFont(ofSize: size, weight: .regular)
+        first([BundledFonts.regular.postScriptName, "Menlo"], size)
+            ?? .monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
     static func hex(_ v: UInt32) -> NSColor {

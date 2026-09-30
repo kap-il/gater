@@ -91,75 +91,17 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## IBM 3270 font
+## IBM Plex Mono font
 
-https://github.com/rbanffy/3270font (release v3.0.1)
+https://github.com/IBM/plex (release @ibm/plex-mono@2.5.0)
 
-BSD 3-Clause License. Full text in Sources/G8rCore/Resources/Fonts/3270-LICENSE.txt:
+SIL Open Font License 1.1. Full text in Sources/G8rCore/Resources/Fonts/IBMPlexMono-OFL.txt:
 
-    Copyright 2022 The 3270font Authors (https://github.com/rbanffy/3270font)
-    
-    Copyright (c) 2011-2022, Ricardo Banffy.
-    Copyright (c) 1993-2011, Paul Mattes.
-    Copyright (c) 2004-2005, Don Russell.
-    Copyright (c) 2004, Dick Altenbern.
-    Copyright (c) 1990, Jeff Sparkes.
-    Copyright (c) 1989, Georgia Tech Research Corporation (GTRC), Atlanta, GA 30332.
-    All rights reserved.
-    
-    Redistribution and use in source and binary forms, with or without
-    modification, are permitted provided that the following conditions are
-    met:
-    
-        * Redistributions of source code must retain the above copyright notice,
-          this list of conditions and the following disclaimer.
-    
-        * Redistributions in binary form must reproduce the above copyright notice,
-          this list of conditions and the following disclaimer in the documentation
-          and/or other materials provided with the distribution.
-    
-        * Neither the name of Ricardo Banffy, Paul Mattes, Don Russell,
-          Dick Altenbern, Jeff Sparkes, GTRC nor the names of their contributors
-          may be used to endorse or promote products derived from this software
-          without specific prior written permission.
-    
-    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-    ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-    WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
-    IN NO EVENT SHALL RICARDO BANFFY, PAUL MATTES, DON RUSSELL, DICK ALTENBERN, JEFF
-    SPARKES OR GTRC BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-    EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
-    OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-    INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
-    STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
-    OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-    
-    The Debian Logo glyph is based on the Debian Open Use Logo and is
-    Copyright (c) 1999 Software in the Public Interest, Inc., and it is
-    incorporated here under the terms of the Creative Commons
-    Attribution-ShareAlike 3.0 Unported License. The logo is released
-    under the terms of the GNU Lesser General Public License, version 3 or
-    any later version, or, at your option, of the Creative Commons
-    Attribution-ShareAlike 3.0 Unported License.
-    
-    Ubuntu, the Ubuntu logo and the Circle of Friends symbol are
-    registered trademarks of Canonical Ltd.
-    
-    The Fontforge SFD font description file is optionally licensed under
-    the SIL Open Font License v1.1 with no Reserved Font Name. This
-    license is available with a FAQ at http://scripts.sil.org/OFL.
-
-## VT323 font
-
-https://github.com/google/fonts/tree/main/ofl/vt323
-
-SIL Open Font License 1.1. Full text in Sources/G8rCore/Resources/Fonts/VT323-OFL.txt:
-
-    Copyright 2011, The VT323 Project Authors (peter.hull@oikoi.com)
+    Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"
     
     This Font Software is licensed under the SIL Open Font License, Version 1.1.
-    This license is copied below, and is also available with a FAQ at:
-    http://scripts.sil.org/OFL
+    
+    This license is copied below, and is also available with a FAQ at: http://scripts.sil.org/OFL
     
     
     -----------------------------------------------------------
@@ -175,7 +117,7 @@ SIL Open Font License 1.1. Full text in Sources/G8rCore/Resources/Fonts/VT323-OF
     
     The OFL allows the licensed fonts to be used, studied, modified and
     redistributed freely as long as they are not sold by themselves. The
-    fonts, including any derivative works, can be bundled, embedded,
+    fonts, including any derivative works, can be bundled, embedded, 
     redistributed and/or sold with any software provided that any reserved
     names are not used by derivative works. The fonts and derivatives,
     however, cannot be released under any other type of license. The
