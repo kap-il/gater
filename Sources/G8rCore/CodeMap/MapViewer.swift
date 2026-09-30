@@ -40,6 +40,17 @@ public enum MapViewer {
         return GitWorktree.head(of: integration) != nil ? integration : planRoot
     }
 
+    /// The quiet line the map shows while nothing is busy, when the plan
+    /// root isn't in a git repository: the map still draws, but there is no
+    /// history to replay and nothing to branch a build from.
+    public static let notARepositoryNote = "Not a git repository: history and builds are off until `git init`."
+
+    /// What the busy area says when nothing is busy: `notARepositoryNote`
+    /// outside a git repository, else nothing.
+    public static func idleNote(planRoot: String) -> String? {
+        GitWorktree.isRepository(planRoot) ? nil : notARepositoryNote
+    }
+
     /// The files whose change on disk means the map must be measured again:
     /// the plan docs and `g8r.json`, as absolute paths.
     public static func watchedFiles(planRoot: String, map: LivingMap?) -> [String] {

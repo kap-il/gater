@@ -106,8 +106,10 @@ final class MapViewController: NSViewController, WKScriptMessageHandler, WKNavig
         }
     }
 
+    /// Nil clears the busy line back to the idle note, if there is one.
     func setBusy(_ text: String?) {
         guard pageReady else { return }
+        let text = text ?? MapViewer.idleNote(planRoot: planRoot)
         let arg = text.flatMap { try? String(decoding: JSONEncoder().encode($0), as: UTF8.self) } ?? "null"
         webView.evaluateJavaScript("window.g8r.setBusy(\(arg))")
     }

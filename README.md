@@ -64,10 +64,10 @@ bun add typescript@^7
 
 ## Running
 
-g8r works on a git repository with at least one commit:
+g8r opens any folder. Inside a git repository it opens the repository's root; any other folder is opened as it is, with the map, shell and event log working and history and builds off until `git init`. Building from the map needs a commit to branch from: in a repository with none, or a folder with no git, g8r offers to initialize git (if needed) and commit only the plan docs and `g8r.json`.
 
 ```sh
-cd path/to/your-repo
+cd path/to/your-folder
 swift run --package-path path/to/g8r G8r
 ```
 
@@ -93,7 +93,7 @@ Delegate boxes collapse from their title bar. **G8r → Auto-trust Delegate Work
 
 ## What g8r writes
 
-In your repository (excluded via `.git/info/exclude`, so `git status` stays clean):
+In the folder you open (excluded via `.git/info/exclude` in a git repository, so `git status` stays clean):
 
 | Path | |
 |---|---|

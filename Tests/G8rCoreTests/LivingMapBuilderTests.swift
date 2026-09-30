@@ -54,7 +54,7 @@ final class LivingMapBuilderTests: XCTestCase {
 
     /// A shop whose plan names three components, with code for each, code
     /// no plan mentions, tests, and files the map must leave out.
-    private func writeShop() throws {
+    private func writeShop(commit: Bool = true) throws {
         try write("PLAN.md", """
         # Shop
 
@@ -146,8 +146,10 @@ final class LivingMapBuilderTests: XCTestCase {
         // Nothing to go on: left off the map.
         try write("Tests/OrphanTests.swift", "func testNothing() {}\n")
 
-        try git("add", "-A")
-        try git("commit", "-qm", "shop")
+        if commit {
+            try git("add", "-A")
+            try git("commit", "-qm", "shop")
+        }
         // Untracked but not ignored: git would track it, so the map has it.
         try write("src/auth/Pending.swift", "struct Pending {}\n")
     }
@@ -408,12 +410,58 @@ final class LivingMapBuilderTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(LivingMap.self, from: data), map)
     }
 
-    func testRefusesAFolderThatIsNotARepository() throws {
-        let plain = FileManager.default.temporaryDirectory.appendingPathComponent("g8r-plain-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: plain, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: plain) }
+    // MARK: - A folder that isn't a repository
 
-        XCTAssertThrowsError(try LivingMapBuilder.build(planRoot: plain.path, codeRoot: plain.path,
-                                                        scanner: StubScanner(), stages: [], extractor: nil))
+    func testAFolderThatIsNotARepositoryIsWalked() throws {
+        try FileManager.default.removeItem(at: root.appendingPathComponent(".git"))
+        try write("PLAN.md", "# Plan\n\n## core: Core\n\nRuns.\n\n- Code: `src/`\n")
+        try write("g8r.json", #"{"ignore": ["gen/**", "*.log"]}"#)
+        for path in ["src/A.swift", "src/nested/B.swift", "src/notes.txt", "Tests/ATests.swift",
+                     "vendors/C.swift", "web/app.ts",
+                     // Hidden entries, skipped folders at any depth, and ignored globs.
+                     ".hidden.swift", ".tools/D.swift", "src/.cache/E.swift", ".git/HEAD",
+                     ".build/debug/F.swift", "web/node_modules/pkg/index.js", "dist/out.js",
+                     "src/build/G.swift", ".next/page.js", "target/debug/H.rs", "vendor/I.go",
+                     "gen/J.swift", "run.log"] {
+            try write(path, "struct X {}\n")
+        }
+        try FileManager.default.createSymbolicLink(atPath: root.appendingPathComponent("linked.swift").path,
+                                                   withDestinationPath: root.appendingPathComponent("src/A.swift").path)
+        try FileManager.default.createSymbolicLink(atPath: root.appendingPathComponent("src-link").path,
+                                                   withDestinationPath: root.appendingPathComponent("src").path)
+
+        XCTAssertEqual(try LivingMapBuilder.trackedFiles(in: root.path, ignoring: ["gen/**", "*.log"]), [
+            "PLAN.md", "Tests/ATests.swift", "g8r.json", "linked.swift", "src/A.swift", "src/nested/B.swift",
+            "src/notes.txt", "vendors/C.swift", "web/app.ts",
+        ])
+    }
+
+    func testAMapIsBuiltOnAFolderThatIsNotARepository() throws {
+        try writeShop()
+        let tracked = try build(stages: [Drift(), Timeline(), BuildNotes(), Evidence()])
+        try? FileManager.default.removeItem(at: root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try writeShop(commit: false)
+        XCTAssertFalse(GitWorktree.isRepository(root.path))
+
+        let map = try build(stages: [Drift(), Timeline(), BuildNotes(), Evidence()])
+        XCTAssertNil(map.head)
+        XCTAssertEqual(map.timeline, [], "no history to replay")
+        XCTAssertEqual(map.nodes.map { $0.git?.commits }, Array(repeating: 0, count: map.nodes.count))
+        // The same files, owners and test attribution as the repository.
+        XCTAssertEqual(map.nodes.map(\.id), tracked.nodes.map(\.id))
+        XCTAssertEqual(map.nodes.map(\.files), tracked.nodes.map(\.files))
+        XCTAssertEqual(map.nodes.map(\.tests), tracked.nodes.map(\.tests))
+        XCTAssertEqual(map.node("tokens")?.tests, NodeTests(files: ["Tests/LedgerTests.swift"], count: 1))
+        XCTAssertEqual(map.edges, tracked.edges)
+        XCTAssertEqual(map.docs, tracked.docs)
+        XCTAssertEqual(map.nodes.map(\.status), tracked.nodes.map(\.status))
+    }
+
+    func testTheIdleNoteSaysWhenThereIsNoRepository() throws {
+        XCTAssertNil(MapViewer.idleNote(planRoot: root.path))
+        try FileManager.default.removeItem(at: root.appendingPathComponent(".git"))
+        XCTAssertEqual(MapViewer.idleNote(planRoot: root.path),
+                       "Not a git repository: history and builds are off until `git init`.")
     }
 }

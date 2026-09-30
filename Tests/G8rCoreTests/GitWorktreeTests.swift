@@ -144,6 +144,47 @@ final class GitWorktreeTests: XCTestCase {
         XCTAssertNoThrow(try GitWorktree.ensure(delegate: "auth", repoRoot: empty))
     }
 
+    func testAFolderIsInitializedThenGivenOnlyThePlanAsItsFirstCommit() throws {
+        let plain = sandbox.appendingPathComponent("plain").path
+        try FileManager.default.createDirectory(atPath: plain + "/src", withIntermediateDirectories: true)
+        try "# plan\n".write(toFile: plain + "/PLAN.md", atomically: true, encoding: .utf8)
+        try "{}\n".write(toFile: plain + "/g8r.json", atomically: true, encoding: .utf8)
+        try "code\n".write(toFile: plain + "/src/a.swift", atomically: true, encoding: .utf8)
+        XCTAssertFalse(GitWorktree.isRepository(plain))
+        XCTAssertThrowsError(try GitWorktree.ensure(delegate: "auth", repoRoot: plain)) {
+            XCTAssertEqual($0 as? GitWorktreeError, .notARepository(plain))
+        }
+
+        try GitWorktree.initialize(plain)
+        XCTAssertTrue(GitWorktree.isRepository(plain))
+        XCTAssertNil(GitWorktree.head(of: plain), "initializing stages and commits nothing")
+        XCTAssertEqual(try GitWorktree.git(["status", "--porcelain", "--", "PLAN.md"], in: plain).output, "?? PLAN.md\n")
+        let exclude = try String(contentsOfFile: plain + "/.git/info/exclude", encoding: .utf8)
+        XCTAssertTrue(exclude.contains("\n/.g8r/\n"))
+
+        for args in [["config", "user.name", "t"], ["config", "user.email", "t@t"]] {
+            XCTAssertEqual(try GitWorktree.git(args, in: plain).status, 0)
+        }
+        try GitWorktree.commitFirst(paths: ["PLAN.md", "g8r.json"], repoRoot: plain)
+        XCTAssertEqual(try GitWorktree.git(["ls-files"], in: plain).output.split(separator: "\n"),
+                       ["PLAN.md", "g8r.json"])
+        XCTAssertEqual(try GitWorktree.git(["status", "--porcelain"], in: plain).output, "?? src/\n")
+        XCTAssertNoThrow(try GitWorktree.ensure(delegate: "auth", repoRoot: plain))
+
+        // Initializing a repository again changes nothing.
+        let head = GitWorktree.head(of: plain)
+        try GitWorktree.initialize(plain)
+        XCTAssertEqual(GitWorktree.head(of: plain), head)
+    }
+
+    func testExcludingOutsideARepositoryDoesNothing() throws {
+        let plain = sandbox.appendingPathComponent("plain").path
+        try FileManager.default.createDirectory(atPath: plain, withIntermediateDirectories: true)
+        XCTAssertNoThrow(try GitWorktree.exclude(pattern: "/.g8r/", comment: "G8r runtime state", in: plain))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: plain), [])
+        XCTAssertNoThrow(try HookInstaller.install(into: plain, config: .init(hookBinary: "/bin/g8r-hook")))
+    }
+
     func testRemovalKeepsTheBranchAndRefusesDirty() throws {
         let clean = try GitWorktree.ensure(delegate: "clean", repoRoot: repo)
         let dirty = try GitWorktree.ensure(delegate: "dirty", repoRoot: repo)

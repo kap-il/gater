@@ -196,26 +196,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// A repo with no commits has nothing to branch a build from. Offer to
-    /// commit the plan docs, and only those, as its first commit.
+    /// commit the plan docs, and only those, as its first commit. A folder
+    /// that isn't a git repository is offered `git init` first.
     private func offerFirstCommit(then component: String, in map: LivingMap) {
         let root = paneManager.repoRoot
+        let initialize = !GitWorktree.isRepository(root)
         var paths = map.docs.map(\.path)
         if FileManager.default.fileExists(atPath: (root as NSString).appendingPathComponent("g8r.json")) {
             paths.append("g8r.json")
         }
+        let plan = paths.isEmpty ? "the plan" : paths.joined(separator: ", ")
         let alert = NSAlert()
-        alert.messageText = "\((root as NSString).lastPathComponent) has no commits yet"
-        alert.informativeText = "Builds branch from a commit. Commit "
-            + (paths.isEmpty ? "the plan" : paths.joined(separator: ", "))
-            + " as the first commit and start the build? Nothing else is staged."
-        alert.addButton(withTitle: "Commit and Build")
+        if initialize {
+            alert.messageText = "\((root as NSString).lastPathComponent) isn't a git repository"
+            alert.informativeText = "Builds branch from a commit. Initialize git here, commit \(plan) "
+                + "as the first commit and start the build? Nothing else is staged."
+            alert.addButton(withTitle: "Initialize git and commit the plan")
+        } else {
+            alert.messageText = "\((root as NSString).lastPathComponent) has no commits yet"
+            alert.informativeText = "Builds branch from a commit. Commit \(plan) "
+                + "as the first commit and start the build? Nothing else is staged."
+            alert.addButton(withTitle: "Commit and Build")
+        }
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else {
-            mapController.setBusy("Make a first commit in \(root), then build again.")
+            mapController.setBusy(initialize ? nil : "Make a first commit in \(root), then build again.")
             return
         }
         do {
+            if initialize { try GitWorktree.initialize(root) }
             try GitWorktree.commitFirst(paths: paths, repoRoot: root)
+            mapController.refresh()
             build(component)
         } catch {
             mapController.setBusy("Couldn't make the first commit: \(error)")
@@ -263,26 +274,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Repo selection
 
-    /// The repo to work on: first CLI argument, else the current
-    /// directory, else ask. Must be a git repository (delegates need
-    /// worktrees).
+    /// The folder to work on: first CLI argument, else the current
+    /// directory, else ask. Inside a git repository that is the repo's
+    /// root; any other folder is its own root, with history and builds off
+    /// until `git init`. A launch from Finder starts in `/`, which is
+    /// never picked on its own.
     private func resolveRepoRoot() -> String? {
         let args = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
-        let candidate = args.first ?? FileManager.default.currentDirectoryPath
-        if let root = GitWorktree.repoRoot(containing: candidate) { return root }
+        if let candidate = args.first ?? launchDirectory(), let root = root(of: candidate) { return root }
 
         let panel = NSOpenPanel()
-        panel.message = "Choose the git repository G8r should open"
+        panel.message = "Choose the folder G8r should open"
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         while panel.runModal() == .OK, let url = panel.url {
-            if let root = GitWorktree.repoRoot(containing: url.path) { return root }
-            let alert = NSAlert()
-            alert.messageText = "\(url.lastPathComponent) isn't inside a git repository."
-            alert.runModal()
+            if let root = root(of: url.path) { return root }
         }
         return nil
+    }
+
+    /// The current directory, unless it is `/`.
+    private func launchDirectory() -> String? {
+        let current = FileManager.default.currentDirectoryPath
+        return current == "/" ? nil : current
+    }
+
+    /// The repository's root for a folder inside one, else the folder
+    /// itself; nil when it isn't a folder.
+    private func root(of path: String) -> String? {
+        if let root = GitWorktree.repoRoot(containing: path) { return root }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue
+        else { return nil }
+        return URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
     // MARK: - Actions
