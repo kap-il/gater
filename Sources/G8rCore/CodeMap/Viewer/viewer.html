@@ -10,17 +10,17 @@
 <style>
   :root {
     color-scheme: dark;
-    --bg: #07110B; --map: #041A0B; --node: #0A2814; --node-planned: #062010; --surface: #0C1A12; --soft: #122419; --code: #0A160F; --line: #1E3A28;
-    --ink: #CFDCC4; --muted: #7E9A7F; --accent: #2F6B45; --bright: #5E9E5A;
-    --olive: #556B2F; --teal: #2E5A4C; --bog: #4A5A2A;
-    --proven: #4E9A5B; --built: #5F7663; --unproven: #5F7663; --failing: #A94A35; --planned: #5E8C7A;
-    --blocked: #3E5446; --unplanned: #8C7A3A; --building: #7A9A2E;
-    --confirmed: #4F6B55; --undeclared: #8C7A3A; --unrealized: #5E8C7A; --neutral: #4F6B55;
-    --warn-bg: #1A1C0C;
+    --bg: #002008; --map: #172D00; --node: #223F05; --node-planned: #1B3500; --surface: #03290D; --soft: #0A3413; --code: #01260A; --line: #1E4A1C;
+    --ink: #DCEAC6; --muted: #92AB7E; --accent: #3F6E12; --bright: #8BC34A;
+    --olive: #6E8A22; --teal: #2F6A45; --bog: #3F5A12;
+    --proven: #5FB84A; --built: #7D9A62; --unproven: #7D9A62; --failing: #D4E23A; --planned: #8FC79A;
+    --blocked: #4F6E3A; --unplanned: #A5A94E; --building: #B8E04A;
+    --confirmed: #6B8C52; --undeclared: #A5A94E; --unrealized: #8FC79A; --neutral: #6B8C52;
+    --warn-bg: #26300A;
     --display: "IBM Plex Mono", Menlo, monospace;
     --body: "IBM Plex Mono", Menlo, monospace;
     --mono: "IBM Plex Mono", Menlo, monospace;
-    --glow: 0 0 4px rgba(94, 158, 90, .12);
+    --glow: 0 0 4px rgba(139, 195, 74, .12);
   }
   * { box-sizing: border-box; font-synthesis: none; }
   b, strong { font-weight: 600; color: var(--bright); }
@@ -41,7 +41,7 @@
   header {
     grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
     padding: 10px 18px; border-bottom: 1px solid var(--line); background: var(--surface);
-    box-shadow: 0 1px 0 #07110B, 0 2px 0 var(--line);
+    box-shadow: 0 1px 0 var(--bg), 0 2px 0 var(--line);
   }
   header .mark { font-size: 10px; color: var(--bright); }
   header h1 { font: 600 17px/1 var(--display); margin: 0; color: var(--ink); letter-spacing: .12em; text-transform: uppercase; text-shadow: var(--glow); }

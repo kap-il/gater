@@ -10,11 +10,11 @@ final class TerminalView: NSView {
     let session: TerminalSession
     private let font = TerminalFont()
     private let padding: CGFloat = 4
-    private static let selectionColor = RGB(r: 0x2E, g: 0x5A, b: 0x4C)
+    private static let selectionColor = RGB(r: 0x2F, g: 0x6A, b: 0x45)
     /// Used where a cell has no explicit color (g8r's palette, not libghostty's).
-    private static let defaultBackground = RGB(r: 0x07, g: 0x11, b: 0x0B)
-    private static let defaultForeground = RGB(r: 0xCF, g: 0xDC, b: 0xC4)
-    private static let cursorColor = RGB(r: 0x5E, g: 0x9E, b: 0x5A)
+    private static let defaultBackground = RGB(r: 0x00, g: 0x20, b: 0x08)
+    private static let defaultForeground = RGB(r: 0xDC, g: 0xEA, b: 0xC6)
+    private static let cursorColor = RGB(r: 0x8B, g: 0xC3, b: 0x4A)
     /// True while a mouse drag is making a selection (vs. being reported
     /// to a mouse-tracking program).
     private var selecting = false

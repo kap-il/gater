@@ -1,23 +1,25 @@
 import AppKit
 import G8rCore
 
-/// g8r's palette and type, shared with the map page: deep greens, a brass
-/// for commands, a rust red for errors, and IBM Plex Mono bundled
+/// g8r's palette and type, shared with the map page: built around the
+/// forest green #002008 and the olive #172D00, every colour a green:
+/// khaki-olive for commands and acid chartreuse for errors.
+/// /// for commands, a rust red for errors, and IBM Plex Mono bundled
 /// in G8rCore and registered at launch.
 enum Theme {
-    static let background = hex(0x07110B)
-    static let surface = hex(0x0C1A12)
-    static let raised = hex(0x122419)
-    static let line = hex(0x1E3A28)
-    static let ink = hex(0xCFDCC4)
-    static let muted = hex(0x7E9A7F)
-    static let accent = hex(0x2F6B45)
-    static let brightAccent = hex(0x5E9E5A)
-    static let olive = hex(0x556B2F)
-    static let murkyTeal = hex(0x2E5A4C)
-    static let bog = hex(0x4A5A2A)
-    static let brass = hex(0x8C7A3A)
-    static let error = hex(0xA94A35)
+    static let background = hex(0x002008)
+    static let surface = hex(0x03290D)
+    static let raised = hex(0x0A3413)
+    static let line = hex(0x1E4A1C)
+    static let ink = hex(0xDCEAC6)
+    static let muted = hex(0x92AB7E)
+    static let accent = hex(0x3F6E12)
+    static let brightAccent = hex(0x8BC34A)
+    static let olive = hex(0x8AA13A)
+    static let murkyTeal = hex(0x2F6A45)
+    static let bog = hex(0x3F5A12)
+    static let brass = hex(0xA5A94E)
+    static let error = hex(0xD4E23A)
 
     /// Labels, tab titles, tile titles: Plex Mono Medium, SemiBold when bold.
     static func label(_ size: CGFloat, bold: Bool = false) -> NSFont {

@@ -309,13 +309,36 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
             let button = TabButton(title: item.label, index: index, selected: item === selected)
             button.target = self
             button.action = #selector(tabClicked(_:))
-            tabBar.addArrangedSubview(button)
+            // Every pane's tab can be closed; the map's can't.
+            guard (item.identifier as? String) != Self.mapTabId else {
+                tabBar.addArrangedSubview(button)
+                continue
+            }
+            let close = NSButton(title: "×", target: self, action: #selector(closeTabClicked(_:)))
+            close.tag = index
+            close.isBordered = false
+            close.toolTip = "Close \(item.label)"
+            close.attributedTitle = NSAttributedString(string: "×", attributes: [
+                .font: Theme.label(13), .foregroundColor: item === selected ? Theme.ink : Theme.muted,
+            ])
+            let pair = NSStackView(views: [button, close])
+            pair.orientation = .horizontal
+            pair.spacing = -6
+            pair.alignment = .centerY
+            tabBar.addArrangedSubview(pair)
         }
     }
 
     @objc private func tabClicked(_ sender: NSButton) {
         guard sender.tag < tabView.numberOfTabViewItems else { return }
         tabView.selectTabViewItem(at: sender.tag)
+    }
+
+    @objc private func closeTabClicked(_ sender: NSButton) {
+        guard sender.tag < tabView.numberOfTabViewItems,
+              let id = tabView.tabViewItem(at: sender.tag).identifier as? String,
+              let pane = paneManager.pane(id: id) else { return }
+        paneManager.close(pane)
     }
 
     /// ⌘1…⌘9: tabs first, then delegate tiles top to bottom.
