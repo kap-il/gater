@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventBus: EventBus?
     private var paneManager: PaneManager!
     private var windowController: MainWindowController!
+    private var mapController: MapViewController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = buildMenu()
@@ -42,6 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         paneManager = PaneManager(repoRoot: repoRoot) { [weak self] event in self?.record(event) }
         paneManager.trustWorktrees = autoTrustWorktrees
         windowController = MainWindowController(paneManager: paneManager)
+        mapController = MapViewController(planRoot: repoRoot)
+        windowController.addMap(mapController)
         windowController.showWindow(nil)
 
         startEventBus()
@@ -51,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             showError("Couldn't start the orchestrator pane", error)
         }
+        windowController.showMap()
         // G8R_DEBUG_DELEGATES=a,b opens those delegates at launch, for
         // exercising the tiled layout (with G8R_SNAPSHOT) without clicks.
         for name in debugList("G8R_DEBUG_DELEGATES") {
@@ -69,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         scheduleDebugSnapshot()
+        scheduleMapSnapshot()
     }
 
     private func debugList(_ variable: String) -> [String] {
@@ -88,6 +93,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                   let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
             view.cacheDisplay(in: view.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
+        }
+    }
+
+    /// G8R_SNAPSHOT_MAP=<file.png>: write a picture of the map view two
+    /// seconds after launch (or once the map is first drawn, if later).
+    private func scheduleMapSnapshot() {
+        guard let path = ProcessInfo.processInfo.environment["G8R_SNAPSHOT_MAP"] else { return }
+        windowController.window?.setContentSize(NSSize(width: 1500, height: 950))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.mapController.snapshot(to: path)
         }
     }
 
@@ -112,7 +127,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The bus appends hook events to the log itself; the callback only
         // feeds the live view.
         let bus = EventBus(socketPath: socketPath, eventLog: eventLog, onEvent: { [weak self] event in
-            DispatchQueue.main.async { self?.windowController?.eventFeed.append(event) }
+            DispatchQueue.main.async {
+                self?.windowController?.eventFeed.append(event)
+                self?.mapController?.noteEvent(event)
+            }
         })
         do {
             try FileManager.default.createDirectory(atPath: (socketPath as NSString).deletingLastPathComponent,

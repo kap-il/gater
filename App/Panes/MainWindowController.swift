@@ -88,6 +88,22 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         return (tabView.selectedTabViewItem?.identifier as? String).flatMap(paneManager.pane(id:))
     }
 
+    // MARK: - The map
+
+    static let mapTabId = "map"
+
+    /// The map is the first tab, ahead of the orchestrator.
+    func addMap(_ controller: NSViewController) {
+        let item = NSTabViewItem(identifier: Self.mapTabId)
+        item.label = "Map"
+        item.view = controller.view
+        tabView.insertTabViewItem(item, at: 0)
+    }
+
+    func showMap() {
+        tabView.selectTabViewItem(withIdentifier: Self.mapTabId)
+    }
+
     // MARK: - Adding and removing panes
 
     private func add(_ pane: Pane) {
