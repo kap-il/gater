@@ -86,7 +86,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 for name in toggle { self?.windowController.setCollapsed(collapsed, paneId: "delegate-\(name)") }
             }
         }
-        NSApp.activate(ignoringOtherApps: true)
+        // A snapshot run draws off to the side: it must not take the
+        // keyboard from whatever the user is typing in.
+        let env = ProcessInfo.processInfo.environment
+        if env["G8R_SNAPSHOT"] == nil && env["G8R_SNAPSHOT_MAP"] == nil {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         scheduleDebugBuild()
         scheduleDebugSnapshot()
         scheduleMapSnapshot()

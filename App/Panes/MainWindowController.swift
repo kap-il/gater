@@ -306,37 +306,18 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         tabBar.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let selected = tabView.selectedTabViewItem
         for (index, item) in tabView.tabViewItems.enumerated() {
-            let button = TabButton(title: item.label, index: index, selected: item === selected)
-            button.target = self
-            button.action = #selector(tabClicked(_:))
             // Every pane's tab can be closed; the map's can't.
-            guard (item.identifier as? String) != Self.mapTabId else {
-                tabBar.addArrangedSubview(button)
-                continue
-            }
-            let close = NSButton(title: "×", target: self, action: #selector(closeTabClicked(_:)))
-            close.tag = index
-            close.isBordered = false
-            close.toolTip = "Close \(item.label)"
-            close.attributedTitle = NSAttributedString(string: "×", attributes: [
-                .font: Theme.label(13), .foregroundColor: item === selected ? Theme.ink : Theme.muted,
-            ])
-            let pair = NSStackView(views: [button, close])
-            pair.orientation = .horizontal
-            pair.spacing = -6
-            pair.alignment = .centerY
-            tabBar.addArrangedSubview(pair)
+            let closable = (item.identifier as? String) != Self.mapTabId
+            let tab = TabItemView(title: item.label, index: index, selected: item === selected, closable: closable)
+            tab.onSelect = { [weak self] in self?.tabView.selectTabViewItem(at: index) }
+            tab.onClose = { [weak self] in self?.closeTab(at: index) }
+            tabBar.addArrangedSubview(tab)
         }
     }
 
-    @objc private func tabClicked(_ sender: NSButton) {
-        guard sender.tag < tabView.numberOfTabViewItems else { return }
-        tabView.selectTabViewItem(at: sender.tag)
-    }
-
-    @objc private func closeTabClicked(_ sender: NSButton) {
-        guard sender.tag < tabView.numberOfTabViewItems,
-              let id = tabView.tabViewItem(at: sender.tag).identifier as? String,
+    private func closeTab(at index: Int) {
+        guard index < tabView.numberOfTabViewItems,
+              let id = tabView.tabViewItem(at: index).identifier as? String,
               let pane = paneManager.pane(id: id) else { return }
         paneManager.close(pane)
     }
@@ -354,19 +335,27 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
     }
 }
 
-/// One tab in the themed tab bar: an old-style label on a raised green
-/// tab when selected, a muted label otherwise.
-private final class TabButton: NSButton {
-    init(title: String, index: Int, selected: Bool) {
+/// One tab in the themed tab bar: its label on a raised green tab when
+/// selected, a muted label otherwise, and a close button inside the tab. A
+/// long title (a terminal's own title is appended) is cut off with "…" so
+/// the tab, and its close button, keep a fixed maximum width.
+private final class TabItemView: NSView {
+    var onSelect: (() -> Void)?
+    var onClose: (() -> Void)?
+
+    private static let maxWidth: CGFloat = 280
+    private static let closeWidth: CGFloat = 18
+
+    init(title: String, index: Int, selected: Bool, closable: Bool) {
         super.init(frame: .zero)
-        tag = index
-        isBordered = false
         wantsLayer = true
         layer?.cornerRadius = 4
         layer?.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
         layer?.backgroundColor = (selected ? Theme.raised : NSColor.clear).cgColor
         layer?.borderWidth = selected ? 1 : 0
         layer?.borderColor = Theme.line.cgColor
+        toolTip = title
+
         let shortcut = index < 9 ? "  \u{2318}\(index + 1)" : ""
         let text = NSMutableAttributedString(string: title, attributes: [
             .font: Theme.label(13, bold: selected),
@@ -376,12 +365,43 @@ private final class TabButton: NSButton {
             .font: Theme.label(10),
             .foregroundColor: selected ? Theme.brightAccent : Theme.line,
         ]))
-        attributedTitle = text
+        let label = NSTextField(labelWithAttributedString: text)
+        label.lineBreakMode = .byTruncatingTail
+        label.cell?.truncatesLastVisibleLine = true
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
         translatesAutoresizingMaskIntoConstraints = false
-        heightAnchor.constraint(equalToConstant: 26).isActive = true
-        widthAnchor.constraint(equalToConstant: min(text.size().width + 28, 260)).isActive = true
+        let trailingSpace: CGFloat = closable ? Self.closeWidth + 6 : 12
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 26),
+            widthAnchor.constraint(equalToConstant: min(text.size().width + 12 + trailingSpace + 2, Self.maxWidth)),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailingSpace),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+
+        guard closable else { return }
+        let close = NSButton(title: "×", target: self, action: #selector(closeClicked))
+        close.isBordered = false
+        close.toolTip = "Close \(title)"
+        close.attributedTitle = NSAttributedString(string: "×", attributes: [
+            .font: Theme.label(13), .foregroundColor: selected ? Theme.ink : Theme.muted,
+        ])
+        close.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(close)
+        NSLayoutConstraint.activate([
+            close.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            close.centerYAnchor.constraint(equalTo: centerYAnchor),
+            close.widthAnchor.constraint(equalToConstant: Self.closeWidth),
+        ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func mouseDown(with event: NSEvent) { onSelect?() }
+
+    @objc private func closeClicked() { onClose?() }
 }
