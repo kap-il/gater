@@ -185,8 +185,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try buildLauncher.build(component, in: map)
             mapController.setBusy(nil)
+        } catch BuildCoordinator.BuildError.noCommits {
+            offerFirstCommit(then: component, in: map)
         } catch {
             mapController.setBusy("Couldn't build \(component): \(error)")
+        }
+    }
+
+    /// A repo with no commits has nothing to branch a build from. Offer to
+    /// commit the plan docs, and only those, as its first commit.
+    private func offerFirstCommit(then component: String, in map: LivingMap) {
+        let root = paneManager.repoRoot
+        var paths = map.docs.map(\.path)
+        if FileManager.default.fileExists(atPath: (root as NSString).appendingPathComponent("g8r.json")) {
+            paths.append("g8r.json")
+        }
+        let alert = NSAlert()
+        alert.messageText = "\((root as NSString).lastPathComponent) has no commits yet"
+        alert.informativeText = "Builds branch from a commit. Commit "
+            + (paths.isEmpty ? "the plan" : paths.joined(separator: ", "))
+            + " as the first commit and start the build? Nothing else is staged."
+        alert.addButton(withTitle: "Commit and Build")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            mapController.setBusy("Make a first commit in \(root), then build again.")
+            return
+        }
+        do {
+            try GitWorktree.commitFirst(paths: paths, repoRoot: root)
+            build(component)
+        } catch {
+            mapController.setBusy("Couldn't make the first commit: \(error)")
         }
     }
 

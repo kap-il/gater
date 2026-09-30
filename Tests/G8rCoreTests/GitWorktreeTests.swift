@@ -124,6 +124,26 @@ final class GitWorktreeTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: sandbox.appendingPathComponent("empty-auth").path))
     }
 
+    func testTheFirstCommitHoldsOnlyThePathsGiven() throws {
+        let empty = sandbox.appendingPathComponent("fresh").path
+        try FileManager.default.createDirectory(atPath: empty, withIntermediateDirectories: true)
+        for args in [["init", "-q", "-b", "main"], ["config", "user.name", "t"], ["config", "user.email", "t@t"]] {
+            XCTAssertEqual(try GitWorktree.git(args, in: empty).status, 0)
+        }
+        try "# plan\n".write(toFile: empty + "/PLAN.md", atomically: true, encoding: .utf8)
+        try "secret\n".write(toFile: empty + "/notes.txt", atomically: true, encoding: .utf8)
+
+        try GitWorktree.commitFirst(paths: ["PLAN.md"], repoRoot: empty)
+
+        XCTAssertNotNil(GitWorktree.head(of: empty))
+        let tracked = try GitWorktree.git(["ls-files"], in: empty).output
+        XCTAssertEqual(tracked.split(separator: "\n"), ["PLAN.md"])
+        // A second call finds commits and refuses.
+        XCTAssertThrowsError(try GitWorktree.commitFirst(paths: ["notes.txt"], repoRoot: empty))
+        // Now a build has something to branch from.
+        XCTAssertNoThrow(try GitWorktree.ensure(delegate: "auth", repoRoot: empty))
+    }
+
     func testRemovalKeepsTheBranchAndRefusesDirty() throws {
         let clean = try GitWorktree.ensure(delegate: "clean", repoRoot: repo)
         let dirty = try GitWorktree.ensure(delegate: "dirty", repoRoot: repo)

@@ -7,10 +7,10 @@ import G8rCore
 /// /// for commands, a rust red for errors, and IBM Plex Mono bundled
 /// in G8rCore and registered at launch.
 enum Theme {
-    static let background = hex(0x002008)
-    static let surface = hex(0x03290D)
-    static let raised = hex(0x0A3413)
-    static let line = hex(0x1E4A1C)
+    static let background = hex(0x002008)   // primary: forest
+    static let surface = hex(0x172D00)      // primary: olive
+    static let raised = hex(0x223F05)
+    static let line = hex(0x2E4E0C)
     static let ink = hex(0xDCEAC6)
     static let muted = hex(0x92AB7E)
     static let accent = hex(0x3F6E12)

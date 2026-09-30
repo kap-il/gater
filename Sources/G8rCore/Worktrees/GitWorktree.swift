@@ -124,6 +124,24 @@ public enum GitWorktree {
         return target
     }
 
+    /// Makes a repository's first commit from `paths` alone (plan docs,
+    /// usually), so builds have something to branch from. Nothing else in
+    /// the folder is staged. Refuses a repository that already has commits.
+    public static func commitFirst(paths: [String], repoRoot: String,
+                                   message: String = "Add the plan") throws {
+        guard head(of: repoRoot) == nil else {
+            throw GitWorktreeError.gitFailed(arguments: ["commit"], status: 1,
+                                             output: "\(repoRoot) already has commits.")
+        }
+        guard !paths.isEmpty else { throw GitWorktreeError.noCommits(repoRoot) }
+        for args in [["add", "--"] + paths, ["commit", "-m", message, "--"] + paths] {
+            let result = try git(args, in: repoRoot)
+            guard result.status == 0 else {
+                throw GitWorktreeError.gitFailed(arguments: args, status: result.status, output: result.output)
+            }
+        }
+    }
+
     /// Removes a delegate's worktree folder, keeping its branch (and so
     /// its commits). Refuses — without forcing — if it has uncommitted
     /// changes, so nothing is lost silently.
