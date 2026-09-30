@@ -57,11 +57,22 @@ build sessions ◄── clickbuild ◄─────────────�
 
 Two roots matter:
 
-- **Plan root:** the folder the user opened: the root of the git repository
-  it is in, or the folder itself when it is in none. Plan docs and
-  `g8r.json` are read from here, including edits that aren't committed yet.
-  A folder outside git still gets its map, shell and event log; history and
-  builds are off until `git init` (see clickbuild).
+- **Plan root:** the project the user is working in. It starts as the
+  folder g8r was opened on and then follows the active shell (the pane
+  with keyboard focus, else the selected tab; delegate and build panes
+  don't count): once a second, while g8r is the active app, g8r reads that
+  shell's working folder from the kernel (`proc_pidinfo`, which needs no
+  shell setup) and resolves it with `ProjectRoot.resolve`: the top level
+  of the git repository it is in; else the nearest folder from it upwards,
+  below the home folder, holding `PLAN.md`, `plans/`, `docs/plans/` or
+  `g8r.json`; else the folder itself. `cd` within a project leaves the
+  root alone. When the root moves, the map, the window title, Build, Run
+  tests, New Shell, New Delegate and the event log (`<root>/.g8r/`) move
+  with it, and `root_changed` is logged. Build sessions already open keep
+  their own root, and the wired agent stays wired. Plan docs and
+  `g8r.json` are read from here, including edits that aren't committed
+  yet. A folder outside git still gets its map, shell and event log;
+  history and builds are off until `git init` (see clickbuild).
 - **Code root:** where the code is measured. It is the integration worktree
   `../<repo>-integration` once that exists, and the plan root until then.
   Built components land on `g8r/integration`, so that is where the map has
@@ -355,6 +366,7 @@ New kinds in `.g8r/events.jsonl`, beside `pane_opened`, `pane_closed`,
 | `build_needs_human` | `component`, `reason` | clickbuild |
 | `tests_ran` | `passed`, `failed`, `exit`, `command` | evidence |
 | `agent_started` | `pane`, `agent` | an agent shim, through `g8r-hook agent-started` |
+| `root_changed` | `from`, `to`, `pane` | the app, when the active shell's folder moves the plan root; written to both roots' logs |
 
 Hook events from a build session carry `component` as well as `pane`.
 
@@ -484,11 +496,14 @@ Session and shell panes, the window, and the live event feed.
 ### app: App shell
 
 Picks the folder, opens the log, starts the bus, opens the window. Any
-folder opens: inside a git repository the repo's root, otherwise the folder
-itself. The `g8r` command does the same.
+folder opens, resolved as the plan root is: inside a git repository the
+repo's root, otherwise the nearest folder with a plan, otherwise the folder
+itself. The `g8r` command does the same. From then on the root follows the
+active shell (`ProjectRoot`, `ProcessDirectory`).
 
 - Needs: panes, eventbus, eventlog, worktrees
-- Code: `App/G8rApp.swift`
+- Code: `App/G8rApp.swift`, `Sources/G8rCore/Project/`,
+  `Sources/G8rTerminal/ProcessDirectory.swift`
 
 ## To build
 
@@ -871,12 +886,15 @@ In the app, the map is the first tab of the main area, ahead of the
 shells. The app opens on the shell, since a repo may have no plan yet. `MapViewController` hosts the `WKWebView`, answers the bridge
 messages, and redraws when any of these happen: the app starts, a plan doc
 or `g8r.json` changes on disk, hook events arrive (at most once a second), a
-test run ends, or the page asks. The map is measured off the main thread.
+test run ends, the plan root moves, or the page asks. The map is measured
+off the main thread. When the plan root moves (see "Plan root" above),
+`setPlanRoot` measures the new root from scratch, and the header names it.
 
 ```swift
 // App/Map/
 final class MapViewController: NSViewController {
     init(planRoot: String)
+    func setPlanRoot(_ root: String)
     var onBuild: ((_ component: String) -> Void)?
     var onRunTests: (() -> Void)?
     func refresh()

@@ -38,6 +38,9 @@ final class BuildLauncher: BuildHost {
         coordinator.handle(event)
     }
 
+    /// Whether any session this started is still open.
+    var hasOpenSessions: Bool { !coordinator.openPanes.isEmpty }
+
     /// Closes the open build panes, so the log says their sessions ended.
     /// Their worktrees and branches stay for the next build.
     func closeAll() {

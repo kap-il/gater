@@ -102,6 +102,9 @@ public final class PTYProcess {
     /// Only touched on `writeQueue`; guards against writing to a closed fd
     /// whose number the kernel may have handed to something else.
     private var closed = false
+    /// Whether the fd is closed, so `foregroundProcessGroup` never asks
+    /// about a number the kernel has handed to something else.
+    private let fdState = FDState()
 
     /// Output from the child, delivered on the read queue. The buffer is
     /// only valid for the duration of the call.
@@ -148,8 +151,8 @@ public final class PTYProcess {
     public func start() {
         let read = DispatchSource.makeReadSource(fileDescriptor: fd, queue: readQueue)
         read.setEventHandler { [weak self] in self?.drain() }
-        read.setCancelHandler { [writeQueue, fd] in
-            writeQueue.async { close(fd) }
+        read.setCancelHandler { [writeQueue, fd, fdState] in
+            writeQueue.async { fdState.close(fd) }
         }
         readSource = read
 
@@ -238,9 +241,35 @@ public final class PTYProcess {
         }
     }
 
+    /// The terminal's foreground process group (its leader's pid), or nil
+    /// once the child side has closed.
+    public var foregroundProcessGroup: pid_t? {
+        fdState.ifOpen { tcgetpgrp(fd) }.flatMap { $0 > 0 ? $0 : nil }
+    }
+
     /// SIGHUP, like a terminal window closing.
     public func terminate() {
         kill(pid, SIGHUP)
+    }
+}
+
+/// The PTY fd's open or closed state, shared with the read source's
+/// cancel handler, which closes it.
+private final class FDState {
+    private let lock = NSLock()
+    private var closed = false
+
+    func close(_ fd: Int32) {
+        lock.lock()
+        defer { lock.unlock() }
+        closed = true
+        Darwin.close(fd)
+    }
+
+    func ifOpen<T>(_ body: () -> T) -> T? {
+        lock.lock()
+        defer { lock.unlock() }
+        return closed ? nil : body()
     }
 }
 

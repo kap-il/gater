@@ -7,7 +7,10 @@ public final class EventBus {
     public typealias EventHandler = (G8rEvent) -> Void
 
     private let server: UnixSocketServer
-    private let eventLog: EventLog?
+    private var eventLog: EventLog?
+    /// Guards `eventLog`: lines arrive on the socket's threads, and the app
+    /// swaps the log when the project root moves.
+    private let logLock = NSLock()
     private let onEvent: EventHandler?
     private let decoder = JSONDecoder()
 
@@ -35,6 +38,17 @@ public final class EventBus {
         try server.start()
     }
 
+    /// Appends from now on go to `log`. Returns the log they went to
+    /// before, for the caller to close.
+    @discardableResult
+    public func setEventLog(_ log: EventLog?) -> EventLog? {
+        logLock.lock()
+        defer { logLock.unlock() }
+        let old = eventLog
+        eventLog = log
+        return old
+    }
+
     public func stop() {
         server.stop()
     }
@@ -44,7 +58,9 @@ public final class EventBus {
               let event = try? decoder.decode(G8rEvent.self, from: data) else {
             return
         }
+        logLock.lock()
         if let eventLog { _ = try? eventLog.append(event) }
+        logLock.unlock()
         onEvent?(event)
     }
 
