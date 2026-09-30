@@ -14,4 +14,13 @@ final class GlobTests: XCTestCase {
         XCTAssertFalse(Glob.isPathLike("getUser"))
         XCTAssertTrue(Glob.isPathLike("src/**"))
     }
+
+    func testTrailingSlashNamesADirectory() {
+        XCTAssertTrue(Glob.matches("a/b/", "a/b/c.swift"))
+        XCTAssertTrue(Glob.matches("a/b/", "a/b/deep/c.swift"))
+        XCTAssertFalse(Glob.matches("a/b/", "a/bc/d.swift"))
+        XCTAssertFalse(Glob.matches("a/b/", "a/b"))
+        XCTAssertTrue(Glob.matches("src/*/", "src/auth/x.ts"))
+        XCTAssertFalse(Glob.matches("src/*/", "src/x.ts"))
+    }
 }
