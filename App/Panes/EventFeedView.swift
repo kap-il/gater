@@ -83,7 +83,8 @@ final class EventFeedView: NSView {
         switch kind {
         case "command": return Theme.brass
         case "edit": return Theme.brightAccent
-        case "pane_opened", "pane_closed", "session_start", "stop": return Theme.muted
+        case "pane_opened", "pane_closed", "session_start": return Theme.muted
+        case "stop": return Theme.olive
         default: return Theme.ink
         }
     }
