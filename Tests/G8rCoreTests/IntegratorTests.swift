@@ -86,6 +86,17 @@ final class IntegratorTests: XCTestCase {
         XCTAssertEqual(integrator.runTests(command: "echo boom; exit 3")?.passed, false)
     }
 
+    func testTestsThatGoQuietAreStoppedAtTheTimeoutAndLeaveAReport() throws {
+        let integrator = Integrator(repoRoot: repo)
+        try integrator.ensureWorktree()
+        let started = Date()
+        let run = try XCTUnwrap(integrator.runTests(command: "echo waiting; sleep 30", timeout: 1))
+        XCTAssertLessThan(Date().timeIntervalSince(started), 10)
+        XCTAssertFalse(run.passed)
+        XCTAssertTrue(run.tail.hasPrefix("waiting"), run.tail)
+        XCTAssertNotEqual(TestRunner.lastReport(planRoot: repo)?.exit, 0)
+    }
+
     func testWorkDiffAndConfig() throws {
         let path = try GitWorktree.ensure(delegate: "auth", repoRoot: repo)
         let base = try XCTUnwrap(GitWorktree.head(of: path))
