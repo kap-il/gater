@@ -22,7 +22,9 @@ guard let payload = (try? JSONDecoder().decode(JSONValue.self, from: stdinData))
 }
 
 let collector = environment["G8R_COLLECTOR"] ?? EventBus.defaultSocketPath()
-for event in HookProcessor.process(payload: payload, env: .init(paneId: paneId)) {
+// Build sessions also say which component they are building.
+let env = HookProcessor.Environment(paneId: paneId, component: environment["G8R_COMPONENT"])
+for event in HookProcessor.process(payload: payload, env: env) {
     if let line = try? JSONEncoder().encode(event), let text = String(data: line, encoding: .utf8) {
         try? UnixSocketClient(path: collector).send(line: text) // best effort
     }

@@ -111,7 +111,7 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
             guard let self, let pane, focused else { return }
             self.focus(paneId: pane.id)
         }
-        if pane.role == .delegate {
+        if pane.role == .delegate || pane.role == .build {
             addTile(for: pane)
         } else {
             addTab(for: pane)

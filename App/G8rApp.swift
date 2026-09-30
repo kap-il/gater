@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var paneManager: PaneManager!
     private var windowController: MainWindowController!
     private var mapController: MapViewController!
+    private var buildLauncher: BuildLauncher?
+    private var testsRunning = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = buildMenu()
@@ -44,6 +46,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         paneManager.trustWorktrees = autoTrustWorktrees
         windowController = MainWindowController(paneManager: paneManager)
         mapController = MapViewController(planRoot: repoRoot)
+        buildLauncher = BuildLauncher(paneManager: paneManager, planRoot: repoRoot) { [weak self] event in
+            self?.record(event)
+        }
+        mapController.onBuild = { [weak self] component in self?.build(component) }
+        mapController.onRunTests = { [weak self] in self?.runTests() }
         windowController.addMap(mapController)
         windowController.showWindow(nil)
 
@@ -72,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         NSApp.activate(ignoringOtherApps: true)
+        scheduleDebugBuild()
         scheduleDebugSnapshot()
         scheduleMapSnapshot()
     }
@@ -79,6 +87,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func debugList(_ variable: String) -> [String] {
         (ProcessInfo.processInfo.environment[variable] ?? "")
             .split(separator: ",").map(String.init).filter { !$0.isEmpty }
+    }
+
+    /// G8R_DEBUG_BUILD=<id>: build that node once the map is first
+    /// measured, as its Build button would, to exercise click-to-build
+    /// without clicks.
+    private func scheduleDebugBuild() {
+        guard let id = ProcessInfo.processInfo.environment["G8R_DEBUG_BUILD"], !id.isEmpty else { return }
+        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
+            guard let self else { return timer.invalidate() }
+            guard self.mapController.map != nil else { return }
+            timer.invalidate()
+            self.build(id)
+        }
     }
 
     /// G8R_SNAPSHOT=<file.png>: render the window to a PNG after 2s.
@@ -109,6 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) {
+        buildLauncher?.closeAll()
         paneManager?.closeAll()
         eventBus?.stop()
         eventLog?.close()
@@ -120,6 +142,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func record(_ event: G8rEvent) {
         let stored = (try? eventLog?.append(event)) ?? event
         windowController?.eventFeed.append(stored)
+        buildLauncher?.handle(stored)
+        // A build starting, ending or needing a person changes the map.
+        if stored.kind?.hasPrefix("build_") == true { mapController?.noteEvent(stored) }
     }
 
     private func startEventBus() {
@@ -130,6 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self?.windowController?.eventFeed.append(event)
                 self?.mapController?.noteEvent(event)
+                self?.buildLauncher?.handle(event)
             }
         })
         do {
@@ -141,6 +167,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             windowController.eventFeed.append(G8rEvent(kind: "bus_error", extra: [
                 "text": .string("couldn't listen on \(socketPath): \(error)"),
             ]))
+        }
+    }
+
+    // MARK: - The map's buttons
+
+    /// "Build this": a session of its own for the node, in a worktree
+    /// branched from `g8r/integration`.
+    private func build(_ component: String) {
+        guard let map = mapController.map, let buildLauncher else {
+            mapController.setBusy("The map isn't measured yet.")
+            return
+        }
+        do {
+            try buildLauncher.build(component, in: map)
+            mapController.setBusy(nil)
+        } catch {
+            mapController.setBusy("Couldn't build \(component): \(error)")
+        }
+    }
+
+    /// "Run tests": the configured test_command in the code root, where
+    /// built components land; the map is measured again after.
+    private func runTests() {
+        guard !testsRunning else { return }
+        let root = paneManager.repoRoot
+        guard let command = G8rConfig.load(repoRoot: root).testCommand, !command.isEmpty else {
+            mapController.setBusy("No test_command is set in g8r.json.")
+            return
+        }
+        testsRunning = true
+        mapController.setBusy("Running \(command)…")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            _ = TestRunner.run(command: command, codeRoot: MapViewer.codeRoot(planRoot: root), planRoot: root,
+                               timeout: 1800)
+            DispatchQueue.main.async {
+                self?.testsRunning = false
+                self?.mapController.setBusy(nil)
+                self?.mapController.refresh()
+            }
         }
     }
 

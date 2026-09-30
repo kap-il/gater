@@ -6,6 +6,8 @@ enum PaneRole: String {
     case orchestrator
     /// One per worktree; runs a working `claude`.
     case delegate
+    /// One per component being built from the map; ends with the build.
+    case build
     /// Plain shell, not tracked.
     case shell
 }
@@ -34,6 +36,7 @@ final class Pane {
         switch role {
         case .orchestrator: return "orchestrator"
         case .delegate: return "delegate: \(name)"
+        case .build: return "build: \(name)"
         case .shell: return name
         }
     }
