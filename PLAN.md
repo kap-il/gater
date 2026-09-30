@@ -734,7 +734,7 @@ public enum MapViewer {
 ```
 
 In the app, the map is the first tab of the main area, ahead of the
-shells. `MapViewController` hosts the `WKWebView`, answers the bridge
+shells. The app opens on the shell, since a repo may have no plan yet. `MapViewController` hosts the `WKWebView`, answers the bridge
 messages, and redraws when any of these happen: the app starts, a plan doc
 or `g8r.json` changes on disk, hook events arrive (at most once a second), a
 test run ends, or the page asks. The map is measured off the main thread.

@@ -64,7 +64,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             showError("Couldn't start a shell", error)
         }
-        windowController.showMap()
+        // The shell is selected at launch: a repo may have no plan yet, and
+        // the banner plays there. The map stays one click (⌘1) away. A map
+        // snapshot needs the map on screen, so that run shows it instead.
+        if ProcessInfo.processInfo.environment["G8R_SNAPSHOT_MAP"] != nil { windowController.showMap() }
         // G8R_DEBUG_DELEGATES=a,b opens those delegates at launch, for
         // exercising the tiled layout (with G8R_SNAPSHOT) without clicks.
         for name in debugList("G8R_DEBUG_DELEGATES") {
