@@ -5,8 +5,8 @@ import Foundation
 public typealias CommandRunner =
     (_ executable: String, _ arguments: [String], _ stdin: String?) throws -> (status: Int32, output: String)
 
-/// Reads a free-form plan doc by asking Claude which components it
-/// describes. The answer is kept under the hash of the doc's text, so a
+/// Reads a free-form plan doc by asking the agent (Claude Code or Codex)
+/// which components it describes. The answer is kept under the hash of the doc's text, so a
 /// doc is only read by a model when it changes.
 ///
 /// A failed run is not kept: the next call asks again.
@@ -20,16 +20,18 @@ public struct PlanDocExtractor {
         public var description: String {
             switch self {
             case let .failed(output): return output
-            case .noAnswer: return "claude gave no component list"
+            case .noAnswer: return "the agent gave no component list"
             }
         }
     }
 
     private let cacheDirectory: URL
+    private let agent: Agent
     private let run: CommandRunner
 
-    public init(cacheDirectory: URL, run: @escaping CommandRunner) {
+    public init(cacheDirectory: URL, agent: Agent = .default, run: @escaping CommandRunner) {
         self.cacheDirectory = cacheDirectory
+        self.agent = agent
         self.run = run
     }
 
@@ -45,7 +47,7 @@ public struct PlanDocExtractor {
             return components(from: answer, text: text, doc: doc)
         }
 
-        let answer = try Self.answer(from: try run("claude", Self.arguments, text))
+        let answer = try ask(text)
 
         try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
@@ -56,9 +58,40 @@ public struct PlanDocExtractor {
 
     // MARK: - The command
 
-    /// The doc itself goes in on standard input, so its size never meets
-    /// the limit on argument length.
-    static let arguments = ["-p", prompt, "--output-format", "json", "--json-schema", schema]
+    /// Asks the agent about `text`, which goes in on standard input. A
+    /// schema the agent wants as a file is written for the one run.
+    private func ask(_ text: String) throws -> Answer {
+        let schema = agent.needsStrictSchema ? Self.strictSchema : Self.schema
+        var schemaFile: URL?
+        if agent.needsSchemaFile {
+            let file = FileManager.default.temporaryDirectory
+                .appendingPathComponent("g8r-plan-schema-\(UUID().uuidString).json")
+            try schema.write(to: file, atomically: true, encoding: .utf8)
+            schemaFile = file
+        }
+        defer { if let schemaFile { try? FileManager.default.removeItem(at: schemaFile) } }
+
+        let command = agent.oneShot(prompt: Self.prompt, schema: schema, schemaFile: schemaFile?.path ?? "")
+        let found: JSONValue
+        do {
+            found = try agent.oneShotAnswer(from: try run(command.executable, command.arguments, text))
+        } catch let error as Agent.OneShotError {
+            switch error {
+            case let .failed(output): throw ExtractorError.failed(output)
+            case .noAnswer: throw ExtractorError.noAnswer
+            }
+        }
+        guard let data = try? JSONEncoder().encode(found),
+              let answer = try? JSONDecoder().decode(Answer.self, from: data) else {
+            throw ExtractorError.noAnswer
+        }
+        return answer
+    }
+
+    /// Claude Code's arguments, kept for the tests that pin them.
+    static var arguments: [String] {
+        Agent.claudeCode.oneShot(prompt: prompt, schema: schema, schemaFile: "").arguments
+    }
 
     static let prompt = """
         The text on standard input is a plan document for a codebase. List the components it \
@@ -74,7 +107,7 @@ public struct PlanDocExtractor {
         empty if it names none
         - needs: ids of the components in your list that it can't be built without
         - changes: ids of the components in your list that it modifies
-        - doneWhen: how the document says to tell it is finished; leave it out if the document doesn't say
+        - doneWhen: how the document says to tell it is finished; leave it out, or empty, if the document doesn't say
 
         Use only what the document says. Don't read files or run anything.
         """
@@ -86,6 +119,19 @@ public struct PlanDocExtractor {
         "needs":{"type":"array","items":{"type":"string"}},\
         "changes":{"type":"array","items":{"type":"string"}},"doneWhen":{"type":"string"}},\
         "required":["id","name","summary","heading","paths","needs","changes"],\
+        "additionalProperties":false}}},"required":["components"],"additionalProperties":false}
+        """
+
+    /// The same list for a model that checks schemas strictly (Codex):
+    /// every property is required, so `doneWhen` is always given, and
+    /// empty when the document doesn't say.
+    static let strictSchema = """
+        {"type":"object","properties":{"components":{"type":"array","items":{"type":"object",\
+        "properties":{"id":{"type":"string"},"name":{"type":"string"},"summary":{"type":"string"},\
+        "heading":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},\
+        "needs":{"type":"array","items":{"type":"string"}},\
+        "changes":{"type":"array","items":{"type":"string"}},"doneWhen":{"type":"string"}},\
+        "required":["id","name","summary","heading","paths","needs","changes","doneWhen"],\
         "additionalProperties":false}}},"required":["components"],"additionalProperties":false}
         """
 
@@ -104,39 +150,6 @@ public struct PlanDocExtractor {
             var doneWhen: String?
         }
         var components: [Component]
-    }
-
-    /// What `claude -p --output-format json` prints: one object, with the
-    /// schema's answer under `structured_output`.
-    private struct Output: Decodable {
-        var type: String
-        var isError: Bool?
-        var result: String?
-        var answer: Answer?
-
-        enum CodingKeys: String, CodingKey {
-            case type, result
-            case isError = "is_error"
-            case answer = "structured_output"
-        }
-    }
-
-    /// Finds the result in what the command printed. A runner may hand back
-    /// warnings along with it, so when the output as a whole isn't the
-    /// result, its lines are tried, last first.
-    private static func answer(from run: (status: Int32, output: String)) throws -> Answer {
-        let lines = run.output.split(whereSeparator: \.isNewline).map(String.init)
-        let result = ([run.output] + lines.reversed()).lazy
-            .compactMap { try? JSONDecoder().decode(Output.self, from: Data($0.utf8)) }
-            .first { $0.type == "result" }
-
-        if run.status != 0 || result?.isError == true {
-            // Claude's own words when it has any; otherwise the end of the
-            // output, which is where a failing program says why.
-            throw ExtractorError.failed(result?.result ?? lines.suffix(5).joined(separator: "\n"))
-        }
-        guard let answer = result?.answer else { throw ExtractorError.noAnswer }
-        return answer
     }
 
     /// Fills in what only the doc can say: where each component's section

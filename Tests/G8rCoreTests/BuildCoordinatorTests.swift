@@ -23,6 +23,15 @@ final class BuildCoordinatorTests: XCTestCase {
         return coordinator
     }
 
+    private func codexCoordinator(agent command: String, hookBinary: String) -> BuildCoordinator {
+        let coordinator = BuildCoordinator(planRoot: shop.repo, agent: .codex, agentCommand: command,
+                                           hookBinary: hookBinary, host: host,
+                                           record: { [unowned self] in events.append($0) },
+                                           scanner: BuildStubScanner())
+        host.coordinator = coordinator
+        return coordinator
+    }
+
     private func kinds() -> [String] { events.compactMap(\.kind) }
 
     // MARK: - Refusals
@@ -262,5 +271,67 @@ final class BuildCoordinatorTests: XCTestCase {
         let script = BuildLaunch.command(agent: "./agent.sh", pane: "build-x", prompt: "p")
         XCTAssertEqual(script.command, "./agent.sh 'p'; exit")
         XCTAssertTrue(script.idleOnExit)
+    }
+
+    // MARK: - Codex
+
+    /// The same loop with Codex: a stand-in `codex` writes the file,
+    /// commits it with the trailer, runs the notify command it was given
+    /// with a turn-complete payload, and exits. The stand-in `g8r-hook`
+    /// writes down what it was run with; that goes through HookProcessor
+    /// as g8r-hook would send it, and the stop it makes merges the build.
+    func testAStandInCodexEndsMergedThroughItsNotify() throws {
+        try shop.write("g8r.json", """
+        {"agent": "codex", "build_command": "true", "test_command": "test -f src/cart/Cart.swift"}
+        """)
+        let notified = shop.sandbox.appendingPathComponent("notified").path
+        let hook = try shop.script("g8r-hook", """
+        printf '%s\\t%s\\t%s\\t%s\\n' "$G8R_PANE_ID" "$G8R_COMPONENT" "$1" "$2" >> '\(notified)'
+        """)
+        try FileManager.default.createDirectory(at: shop.sandbox.appendingPathComponent("bin"),
+                                                withIntermediateDirectories: true)
+        let codex = try shop.script("bin/codex", """
+        test "$1" = -c
+        case "$3" in *"You are building the \\`cart\\` component"*) ;; *) exit 9 ;; esac
+        notify=$(printf '%s' "$2" | sed -E 's/^notify=\\["([^"]*)", "([^"]*)"\\]$/\\1 \\2/')
+        mkdir -p src/cart
+        echo 'public struct Cart { let store: Store }' > src/cart/Cart.swift
+        git add src/cart/Cart.swift
+        git -c user.name=agent -c user.email=agent@localhost commit -q \\
+          -m 'Add the cart' -m 'Assumed: a cart holds one store.' -m 'G8r-Component: cart'
+        $notify '{"type":"agent-turn-complete","thread-id":"t-1","turn-id":"1","cwd":"'"$PWD"'","input-messages":["build"],"last-assistant-message":"Done."}'
+        """)
+        XCTAssertEqual(G8rConfig.load(repoRoot: shop.repo).agent, .codex)
+
+        let builds = codexCoordinator(agent: codex, hookBinary: hook)
+        let launch = try builds.build("cart", in: try shop.map())
+        XCTAssertFalse(launch.idleOnExit, "Codex says it went idle through notify")
+        XCTAssertTrue(launch.command.hasPrefix("\(codex) -c 'notify=[\"\(hook)\", \"codex-notify\"]' 'You are building"),
+                      launch.command)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: launch.worktree + "/.claude"),
+                       "nothing of Claude Code's in a Codex worktree")
+
+        XCTAssertEqual(try host.runAgent(), 0)
+        XCTAssertEqual(builds.state(of: "cart"), .working, "exiting alone isn't idle for Codex")
+
+        // What g8r-hook does with what it was run with.
+        let lines = try String(contentsOfFile: notified, encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(lines.count, 1)
+        for line in lines {
+            let fields = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            XCTAssertEqual(Array(fields.prefix(3)), ["build-cart", "cart", "codex-notify"])
+            let env = HookProcessor.Environment(paneId: fields[0], component: fields[1])
+            let stops = try XCTUnwrap(HookProcessor.process(arguments: [fields[2], fields[3]],
+                                                            stdin: { Data() }, env: env))
+            XCTAssertEqual(stops.map(\.kind), ["stop"])
+            stops.forEach(builds.handle)
+        }
+
+        XCTAssertNil(builds.state(of: "cart"), "the session is over")
+        XCTAssertEqual(kinds(), ["build_started", "build_checked", "build_merged"])
+        XCTAssertEqual(host.closed, ["build-cart"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: launch.worktree), "worktree removed")
+        let log = try shop.git("log", "--format=%B", Integrator.branch)
+        XCTAssertTrue(log.contains("G8r-Component: cart"), log)
     }
 }

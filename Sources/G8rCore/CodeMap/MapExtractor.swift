@@ -13,7 +13,9 @@ extension PlanDocExtractor {
     /// the cache, and one that isn't there is reported as a problem.
     public static func forMap(planRoot: String, extract: Bool) -> PlanDocExtractor {
         let ask = ProcessRunner.runner(in: planRoot)
-        return PlanDocExtractor(cacheDirectory: cacheDirectory(planRoot: planRoot)) { executable, arguments, stdin in
+        let agent = G8rConfig.load(repoRoot: planRoot).agent
+        return PlanDocExtractor(cacheDirectory: cacheDirectory(planRoot: planRoot), agent: agent) {
+            executable, arguments, stdin in
             guard extract else { throw NotAsked() }
             return try ask(executable, arguments, stdin)
         }

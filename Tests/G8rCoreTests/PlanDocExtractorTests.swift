@@ -284,4 +284,67 @@ final class PlanDocExtractorTests: XCTestCase {
     func testTheCacheOfARepoIsUnderItsDotG8r() {
         XCTAssertEqual(PlanDocExtractor.cacheDirectory(planRoot: "/work/shop").path, "/work/shop/.g8r/plans")
     }
+
+    // MARK: - Codex
+
+    func testAsksCodexWithAStrictSchemaInAFile() throws {
+        let answer = #"{"components":[{"id":"csv-reader","name":"CSV reader","summary":"Reads CSV.","#
+            + #""heading":"Notes on the importer","paths":["src/csv/"],"needs":[],"changes":[],"doneWhen":""},"#
+            + #"{"id":"loader","name":"The loader","summary":"Loads.","heading":"The loader","#
+            + #""paths":["src/load.py"],"needs":["csv-reader"],"changes":[],"doneWhen":"Fast."}]}"#
+        let item = try JSONEncoder().encode(JSONValue.object([
+            "type": .string("item.completed"),
+            "item": .object(["id": .string("item_3"), "type": .string("agent_message"), "text": .string(answer)]),
+        ]))
+        let codex = StubClaude(output: #"{"type":"thread.started","thread_id":"t"}"# + "\n"
+            + String(decoding: item, as: UTF8.self) + "\n" + #"{"type":"turn.completed","usage":{}}"#)
+        var schemaSeen: String?
+        let run: CommandRunner = { executable, arguments, stdin in
+            if let index = arguments.firstIndex(of: "--output-schema") {
+                schemaSeen = try? String(contentsOfFile: arguments[index + 1], encoding: .utf8)
+            }
+            return try codex.run(executable, arguments, stdin)
+        }
+        let extractor = PlanDocExtractor(cacheDirectory: cache, agent: .codex, run: run)
+
+        let components = try extractor.extract(text: Self.doc, doc: "NOTES.md")
+
+        let call = try XCTUnwrap(codex.calls.first)
+        XCTAssertEqual(call.executable, "codex")
+        XCTAssertEqual(Array(call.arguments.prefix(6)), ["exec", "--json", "--ephemeral", "--sandbox", "read-only",
+                                                         "--output-schema"])
+        XCTAssertEqual(call.arguments.last, PlanDocExtractor.prompt)
+        XCTAssertEqual(call.stdin, Self.doc)
+        XCTAssertEqual(schemaSeen, PlanDocExtractor.strictSchema)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: call.arguments[6]), "the schema file is removed")
+
+        XCTAssertEqual(components.map(\.id), ["csv-reader", "loader"])
+        XCTAssertNil(components[0].doneWhen, "an empty doneWhen is none")
+        XCTAssertEqual(components[1].doneWhen, "Fast.")
+        XCTAssertEqual(components[1].needs, ["csv-reader"])
+        XCTAssertEqual(components[1].line, 5)
+
+        XCTAssertEqual(cached(), [Self.docHash + ".json"])
+        _ = try extractor.extract(text: Self.doc, doc: "NOTES.md")
+        XCTAssertEqual(codex.calls.count, 1, "the second read comes from the cache")
+    }
+
+    func testTheStrictSchemaRequiresEveryProperty() throws {
+        let schema = try JSONDecoder().decode(JSONValue.self, from: Data(PlanDocExtractor.strictSchema.utf8))
+        let item = try XCTUnwrap(schema.value(atPath: "properties.components.items"))
+        let properties = try XCTUnwrap(item.value(atPath: "properties")?.objectValue).keys.sorted()
+        let required = try XCTUnwrap(item.value(atPath: "required")?.arrayValue).compactMap(\.stringValue).sorted()
+        XCTAssertEqual(properties, required)
+        XCTAssertEqual(item.value(atPath: "additionalProperties"), .bool(false))
+    }
+
+    func testACodexFailureThrowsAndIsNotKept() {
+        let codex = StubClaude(output: #"{"type":"turn.failed","error":{"message":"401 Unauthorized"}}"#)
+        codex.status = 1
+        let extractor = PlanDocExtractor(cacheDirectory: cache, agent: .codex, run: codex.run)
+        XCTAssertThrowsError(try extractor.extract(text: Self.doc, doc: "NOTES.md")) { error in
+            XCTAssertEqual(error as? PlanDocExtractor.ExtractorError, .failed("401 Unauthorized"))
+        }
+        XCTAssertEqual(cached(), [])
+    }
 }

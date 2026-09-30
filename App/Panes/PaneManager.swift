@@ -17,31 +17,37 @@ final class PaneManager {
     var onPaneRemoved: ((Pane) -> Void)?
     var onPaneTitleChanged: ((Pane) -> Void)?
 
-    /// Mark worktrees G8r creates as trusted in Claude Code before a
+    /// Mark worktrees G8r creates as trusted by the agent before a
     /// session starts there (only if the repo itself is trusted). Off
     /// unless the user turned it on.
     var trustWorktrees = false
 
-    /// The command delegates and build sessions run. Overridable so the
-    /// terminal can be exercised without claude installed.
-    var agentCommand = ProcessInfo.processInfo.environment["G8R_AGENT_COMMAND"] ?? "claude"
+    /// The agent delegates and build sessions run: `agent` in g8r.json or
+    /// .g8r/config.json, or `G8R_AGENT`.
+    let agent: Agent
+
+    /// The command delegates and build sessions run. `G8R_AGENT_COMMAND`
+    /// overrides it, so the terminal can be exercised without the agent
+    /// installed.
+    let agentCommand: String
 
     init(repoRoot: String, record: @escaping (G8rEvent) -> Void) {
         self.repoRoot = repoRoot
         self.record = record
+        agent = G8rConfig.load(repoRoot: repoRoot).agent
+        agentCommand = agent.command()
     }
 
     func pane(id: String) -> Pane? { panes.first { $0.id == id } }
 
     // MARK: - Spawning
 
-    /// `claude --name <pane id>`: the session's display name matches the
-    /// pane id, so it lines up with "pane" in the event log.
-    /// Custom agent commands that aren't claude are run as-is.
+    /// The agent's interactive command for a pane, with no prompt:
+    /// `claude --name <pane id>`, so the session's name lines up with
+    /// "pane" in the event log, or `codex -c notify=…`. Custom commands
+    /// are run as-is.
     private func agentCommand(named id: String) -> String {
-        let program = agentCommand.split(separator: " ").first.map { ($0 as NSString).lastPathComponent }
-        guard program == "claude" else { return agentCommand }
-        return "\(agentCommand) --name \(LaunchConfig.shellQuote(id))"
+        agent.launch(command: agentCommand, name: id, prompt: nil, hookBinary: hookBinaryPath()).command
     }
 
     /// "New delegate": creates `../<repo>-<name>` on `g8r/<name>` and
@@ -51,8 +57,8 @@ final class PaneManager {
         let id = "delegate-\(name)"
         if let existing = pane(id: id) { return existing }
         let worktree = try GitWorktree.ensure(delegate: name, repoRoot: repoRoot)
-        // Must happen before claude starts, or it shows the trust prompt.
-        if trustWorktrees { try? ClaudeTrust.trustWorktree(worktree, createdFrom: repoRoot) }
+        // Must happen before the agent starts, or it shows the trust prompt.
+        if trustWorktrees { try? agent.trustWorktree(worktree, createdFrom: repoRoot) }
         return try spawn(id: id, role: .delegate, name: name, worktree: worktree, command: agentCommand(named: id))
     }
 
@@ -62,7 +68,7 @@ final class PaneManager {
     @discardableResult
     func spawnBuild(_ launch: BuildLaunch) throws -> Pane {
         if let existing = pane(id: launch.pane) { return existing }
-        if trustWorktrees { try? ClaudeTrust.trustWorktree(launch.worktree, createdFrom: repoRoot) }
+        if trustWorktrees { try? agent.trustWorktree(launch.worktree, createdFrom: repoRoot) }
         return try spawn(id: launch.pane, role: .build, name: launch.component, worktree: launch.worktree,
                          command: launch.command, environment: launch.environment)
     }
@@ -146,8 +152,9 @@ final class PaneManager {
         record(event)
     }
 
-    /// Writes G8r's hooks into the pane's worktree so its `claude` reports
-    /// to the event bus. Best-effort: a pane without hooks still works as a
+    /// Writes what the agent needs into the pane's worktree so it reports
+    /// to the event bus (Claude Code's hooks; nothing for Codex, whose
+    /// notify is on its command line). Best-effort: a pane without hooks still works as a
     /// terminal, so failures are logged rather than blocking the spawn.
     private func installHooks(in worktree: String) {
         guard let hook = hookBinaryPath() else {
@@ -155,20 +162,20 @@ final class PaneManager {
             return
         }
         do {
-            try HookInstaller.install(into: worktree, config: .init(hookBinary: hook))
+            try agent.install(into: worktree, hookBinary: hook)
         } catch {
             log(G8rEvent(kind: "hooks_error", extra: ["text": .string("\(worktree): \(error)")]))
         }
     }
 
-    private func hookBinaryPath() -> String? {
+    func hookBinaryPath() -> String? {
         guard let exe = Bundle.main.executableURL else { return nil }
         let path = exe.deletingLastPathComponent().appendingPathComponent("g8r-hook").path
         return FileManager.default.isExecutableFile(atPath: path) ? path : nil
     }
 
     /// Prepends the directory holding `g8r-hook` (built next to the app
-    /// binary) so the hook commands in .claude/settings.json resolve.
+    /// binary) so hook commands that name it resolve.
     private func pathWithHookDirectory() -> String? {
         guard let exe = Bundle.main.executableURL else { return nil }
         let dir = exe.deletingLastPathComponent().path

@@ -14,7 +14,8 @@ final class BuildLauncher: BuildHost {
         self.paneManager = paneManager
         self.record = record
         coordinator = BuildCoordinator(
-            planRoot: planRoot, agentCommand: paneManager.agentCommand, host: self, record: record,
+            planRoot: planRoot, agent: paneManager.agent, agentCommand: paneManager.agentCommand,
+            hookBinary: paneManager.hookBinaryPath(), host: self, record: record,
             scanner: TreeSitterScanner(),
             background: { DispatchQueue.global(qos: .userInitiated).async(execute: $0) },
             main: { DispatchQueue.main.async(execute: $0) })
@@ -42,8 +43,8 @@ final class BuildLauncher: BuildHost {
     func open(_ launch: BuildLaunch) throws {
         let pane = try paneManager.spawnBuild(launch)
         guard launch.idleOnExit else { return }
-        // An agent that isn't Claude Code has no Stop hook: its command
-        // exiting, which ends the pane's shell, is its going idle.
+        // Nothing reports this agent going idle: its command exiting,
+        // which ends the pane's shell, is its going idle.
         pane.session.onExit = { [weak self] _ in
             self?.record(G8rEvent(kind: "stop", extra: [
                 "pane": .string(launch.pane), "component": .string(launch.component),

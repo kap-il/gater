@@ -49,9 +49,18 @@ public enum HookInstaller {
     /// current ones.
     static func merged(existing: [String: JSONValue], config: Config) -> [String: JSONValue] {
         var settings = existing
-        var hooks = existing["hooks"]?.objectValue ?? [:]
+        var hooks = withoutG8rHooks(existing["hooks"]?.objectValue ?? [:])
+        for (event, groups) in g8rHooks(config) {
+            hooks[event] = .array((hooks[event]?.arrayValue ?? []) + groups)
+        }
+        settings["hooks"] = .object(hooks)
+        return settings
+    }
 
-        // Drop G8r-owned hook commands everywhere; drop groups left empty.
+    /// `hooks` with every G8r-owned hook command dropped, and the groups
+    /// and events left empty dropped with them.
+    static func withoutG8rHooks(_ existing: [String: JSONValue]) -> [String: JSONValue] {
+        var hooks = existing
         for (event, value) in hooks {
             let groups = (value.arrayValue ?? []).compactMap { group -> JSONValue? in
                 guard var fields = group.objectValue else { return group }
@@ -65,12 +74,7 @@ public enum HookInstaller {
             }
             hooks[event] = groups.isEmpty ? nil : .array(groups)
         }
-
-        for (event, groups) in g8rHooks(config) {
-            hooks[event] = .array((hooks[event]?.arrayValue ?? []) + groups)
-        }
-        settings["hooks"] = .object(hooks)
-        return settings
+        return hooks
     }
 
     /// Installs (or refreshes) G8r's hooks in `directory`.
@@ -93,6 +97,26 @@ public enum HookInstaller {
         try encoder.encode(JSONValue.object(settings)).write(to: url, options: .atomic)
 
         try? excludeFromGit(directory: directory)
+    }
+
+    /// Takes G8r's hooks out of `directory`'s settings, leaving the user's
+    /// own. A file left with nothing in it is removed.
+    public static func uninstall(from directory: String) throws {
+        let url = URL(fileURLWithPath: directory).appendingPathComponent(settingsPath)
+        guard let data = try? Data(contentsOf: url), !data.isEmpty else { return }
+        guard let parsed = try? JSONDecoder().decode(JSONValue.self, from: data),
+              var settings = parsed.objectValue else {
+            throw HookInstallerError.unreadableSettings(url.path)
+        }
+        let hooks = withoutG8rHooks(settings["hooks"]?.objectValue ?? [:])
+        settings["hooks"] = hooks.isEmpty ? nil : .object(hooks)
+        if settings.isEmpty {
+            try FileManager.default.removeItem(at: url)
+            return
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        try encoder.encode(JSONValue.object(settings)).write(to: url, options: .atomic)
     }
 
     static func excludeFromGit(directory: String) throws {
