@@ -1,39 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <defs>
-  </defs>
-  <rect x="100" y="100" width="824" height="824" rx="185" fill="#050d03" stroke="#1E3A28" stroke-width="8"/>
+  <!-- g8r: a bare wireframe gator head in profile, mouth closed. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#050d03" stroke="#1a3310" stroke-width="8"/>
   <g fill="none" stroke-linecap="round" stroke-linejoin="round">
-    <!-- mesh / construction lines (forest) -->
-    <g stroke="#2F6B45" stroke-width="10">
-      <path d="M300 400 L420 470 L560 395 L680 440 L800 420"/>
-      <path d="M420 470 L470 520 M560 395 L600 480 M680 440 L700 490"/>
-      <path d="M330 600 L450 640 L580 610 L700 640"/>
-      <path d="M450 640 L430 560 M580 610 L560 575"/>
-      <path d="M250 470 L300 400 L330 330"/>
-      <path d="M250 560 L330 600 L300 690"/>
-    </g>
-    <!-- scutes on the neck -->
-    <path d="M212 360 L232 322 L262 345 L286 305 L316 330" stroke="#5E9E5A" stroke-width="16"/>
-    <!-- outline (moss) -->
-    <g stroke="#5E9E5A" stroke-width="22">
-      <!-- upper head and snout -->
-      <path d="M200 520 L200 380 Q240 330 330 330 Q380 270 440 290 Q480 300 500 340 L740 370 Q770 345 800 370 L830 400 Q845 430 820 450 L470 520"/>
-      <!-- lower jaw -->
-      <path d="M470 520 L800 620 Q830 635 810 660 L720 690 L420 700 Q300 700 200 640 L200 520"/>
-      <!-- jaw hinge -->
-      <circle cx="455" cy="535" r="26" stroke-width="14"/>
-    </g>
-    <!-- teeth -->
-    <g stroke="#CFDCC4" stroke-width="12">
-      <path d="M760 455 L752 490 L730 460"/>
-      <path d="M640 478 L632 510 L612 482"/>
-      <path d="M720 610 L716 578 L695 604"/>
-      <path d="M600 575 L598 545 L578 570"/>
-    </g>
-    <!-- eye and nostril (lichen) -->
-    <path d="M395 330 Q430 305 465 325" stroke="#5E9E5A" stroke-width="14"/>
-    <circle cx="430" cy="345" r="20" stroke="#CFDCC4" stroke-width="14"/>
-    <circle cx="436" cy="345" r="5" fill="#CFDCC4" stroke="none"/>
-    <path d="M770 380 Q790 372 805 388" stroke="#CFDCC4" stroke-width="12"/>
+    <!-- the one construction line: the snout's ridge -->
+    <path d="M480 468 L790 482" stroke="#3fa34d" stroke-width="7" stroke-dasharray="2 20"/>
+    <!-- head outline: neck, brow over the eye, long snout, nostril bump, jaw -->
+    <path stroke="#8ef05a" stroke-width="22"
+          d="M205 590 L205 480
+             C240 450 285 432 330 428
+             C352 392 420 382 455 422
+             L790 452
+             C822 452 846 470 846 494
+             C846 520 824 536 796 538
+             L560 580
+             C460 606 330 622 240 606
+             Z"/>
+    <!-- the closed mouth, curling up into a smile at the hinge -->
+    <path stroke="#8ef05a" stroke-width="14" d="M808 516 L500 556 C470 560 452 552 440 534"/>
+    <!-- two scutes on the neck -->
+    <path stroke="#3fa34d" stroke-width="9" d="M238 462 L252 438 L268 454 M282 446 L296 424 L312 438"/>
+    <!-- nostril -->
+    <circle cx="812" cy="474" r="7" stroke="#3fa34d" stroke-width="7"/>
   </g>
+  <!-- the eye -->
+  <circle cx="400" cy="440" r="24" fill="none" stroke="#d8ecc8" stroke-width="11"/>
+  <circle cx="404" cy="440" r="9" fill="#d8ecc8"/>
 </svg>
