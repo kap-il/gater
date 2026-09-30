@@ -38,6 +38,13 @@ final class MapViewerTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(LivingMap.self, from: Data(json.utf8)), map)
     }
 
+    func testHomeAndTheRootAreTooBroadToMap() {
+        XCTAssertTrue(MapViewer.isTooBroadToMap("/"))
+        XCTAssertTrue(MapViewer.isTooBroadToMap("/Users/me", home: "/Users/me"))
+        XCTAssertTrue(MapViewer.isTooBroadToMap("/Users/me/", home: "/Users/me"))
+        XCTAssertFalse(MapViewer.isTooBroadToMap("/Users/me/app", home: "/Users/me"))
+    }
+
     func testShellHasNoMap() throws {
         let shell = try MapViewer.shell()
         XCTAssertTrue(shell.contains("window.G8R_MAP = /*G8R_MAP*/null"))

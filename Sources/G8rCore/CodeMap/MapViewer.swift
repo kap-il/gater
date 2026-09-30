@@ -89,6 +89,13 @@ public enum MapViewer {
         return page.replacingOccurrences(of: fontsPlaceholder, with: fontFaces())
     }
 
+    /// The home folder and `/` are where g8r opens by default, not
+    /// projects; the map waits for the shell to cd into one.
+    public static func isTooBroadToMap(_ root: String, home: String = NSHomeDirectory()) -> Bool {
+        let path = ProjectRoot.canonical(root)
+        return path == "/" || path == ProjectRoot.canonical(home)
+    }
+
     static let fontsPlaceholder = "/*G8R_FONTS*/"
 
     /// `@font-face` rules for the bundled fonts as data URLs, so the page

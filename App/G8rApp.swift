@@ -328,25 +328,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// root; any other folder is its own root, with history and builds off
     /// until `git init`. A launch from Finder starts in `/`, which is
     /// never picked on its own.
+    /// The folder named on the command line, else the current directory,
+    /// else (opened from Finder or the Dock, where that is `/`) the home
+    /// folder, like a terminal. `cd` into a project and the map follows.
     private func resolveRepoRoot() -> String? {
         let args = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
-        if let candidate = args.first ?? launchDirectory(), let root = root(of: candidate) { return root }
-
-        let panel = NSOpenPanel()
-        panel.message = "Choose the folder G8r should open"
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        while panel.runModal() == .OK, let url = panel.url {
-            if let root = root(of: url.path) { return root }
-        }
-        return nil
+        let candidate = args.first ?? launchDirectory()
+        return root(of: candidate) ?? ProjectRoot.canonical(NSHomeDirectory())
     }
 
-    /// The current directory, unless it is `/`.
-    private func launchDirectory() -> String? {
+    /// The current directory, or the home folder when it is `/`.
+    private func launchDirectory() -> String {
         let current = FileManager.default.currentDirectoryPath
-        return current == "/" ? nil : current
+        return current == "/" ? NSHomeDirectory() : current
     }
 
     /// The project root for a folder (`ProjectRoot.resolve`); nil when it

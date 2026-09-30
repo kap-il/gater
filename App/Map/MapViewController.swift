@@ -82,6 +82,12 @@ final class MapViewController: NSViewController, WKScriptMessageHandler, WKNavig
     func refresh() { refresh(extract: false) }
 
     private func refresh(extract: Bool) {
+        // The home folder and `/` aren't projects: walking them for a map
+        // would take ages. Wait for a cd into one.
+        if MapViewer.isTooBroadToMap(planRoot) {
+            setBusy("cd into a project in a shell to see its map.")
+            return
+        }
         if measuring {
             pending = (pending ?? false) || extract
             return
