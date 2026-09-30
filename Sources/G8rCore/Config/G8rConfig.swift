@@ -16,14 +16,19 @@ public struct G8rConfig: Equatable {
     public var worktreeSetup: String?
     /// Globs of paths the map leaves out.
     public var ignore: [String]
+    /// The agent sessions run and plans are read with. A name g8r doesn't
+    /// know leaves the default.
+    public var agent: Agent
 
     public init(plans: [String] = G8rConfig.defaultPlans, buildCommand: String? = nil,
-                testCommand: String? = nil, worktreeSetup: String? = nil, ignore: [String] = []) {
+                testCommand: String? = nil, worktreeSetup: String? = nil, ignore: [String] = [],
+                agent: Agent = .default) {
         self.plans = plans
         self.buildCommand = buildCommand
         self.testCommand = testCommand
         self.worktreeSetup = worktreeSetup
         self.ignore = ignore
+        self.agent = agent
     }
 
     public static func load(repoRoot: String,
@@ -41,7 +46,8 @@ public struct G8rConfig: Equatable {
             buildCommand: environment["G8R_BUILD_COMMAND"] ?? value("build_command")?.stringValue,
             testCommand: environment["G8R_TEST_COMMAND"] ?? value("test_command")?.stringValue,
             worktreeSetup: value("worktree_setup")?.stringValue,
-            ignore: list("ignore") ?? [])
+            ignore: list("ignore") ?? [],
+            agent: (environment["G8R_AGENT"] ?? value("agent")?.stringValue).flatMap(Agent.init(name:)) ?? .default)
     }
 
     /// The top-level keys of a settings file; none when the file is missing

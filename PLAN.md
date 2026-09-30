@@ -20,7 +20,7 @@ Checked 2026-09-29 against Kiro's docs and Task Master's README.
 | Status comes from | the agent marking a task | `set_task_status` | files, symbols and test runs |
 | Edges come from | the task list | the task list | the plan and the code, compared |
 | Node to files, file to node | no | no | yes |
-| Where it runs | inside Kiro | any editor, via MCP | beside stock Claude Code |
+| Where it runs | inside Kiro | any editor, via MCP | beside stock Claude Code or Codex |
 
 They manage the to-do list. g8r keeps the map.
 
@@ -35,8 +35,8 @@ They manage the to-do list. g8r keeps the map.
 4. **Both directions.** A node opens its files and symbols. A file names the
    node it belongs to.
 5. **Plan and code must agree.** Where they differ, the difference is drawn.
-6. **Stock Claude Code.** Building a node starts a normal session in a
-   worktree. g8r composes the prompt and watches the result.
+6. **Stock agents.** Building a node starts a normal Claude Code or Codex
+   session in a worktree. g8r composes the prompt and watches the result.
 7. **One session per component.** A session starts when a node is built and
    ends when that node's checks pass. The next node gets a fresh session.
    Nothing carries over except the code and the plan.
@@ -96,8 +96,8 @@ Everything else in the doc is prose for people. There is no status field:
 status is measured.
 
 A doc with no component sections is free-form. Its components are extracted
-by Claude (`claude -p`) into the same shape and cached by the hash of the
-doc's text.
+by the agent (`claude -p` or `codex exec`) into the same shape and cached by
+the hash of the doc's text.
 
 ### g8r.json
 
@@ -110,7 +110,8 @@ overrides it key by key, and environment variables override both.
   "build_command": "swift build",
   "test_command": "swift test",
   "worktree_setup": "ln -sfn \"$G8R_PLAN_ROOT/Vendor/x.xcframework\" Vendor/x.xcframework",
-  "ignore": ["Vendor/**", "planmap/**"]
+  "ignore": ["Vendor/**", "planmap/**"],
+  "agent": "claude"
 }
 ```
 
@@ -121,6 +122,58 @@ overrides it key by key, and environment variables override both.
 | `test_command` | none | `G8R_TEST_COMMAND` |
 | `worktree_setup` | none; run in each new worktree, with `G8R_PLAN_ROOT` set, to put back what git doesn't carry, such as build output | |
 | `ignore` | none; globs of paths the map leaves out | |
+| `agent` | `claude`; or `codex`. Which agent runs sessions and reads free-form plans. A name g8r doesn't know leaves the default | `G8R_AGENT` |
+
+`G8R_AGENT_COMMAND` replaces the agent's program in session panes (a
+different path, extra flags, or a stand-in script for tests). A command
+whose program is named `claude` or `codex` still gets that agent's flags;
+anything else is run with the prompt as its last argument.
+
+### Agent
+
+A session runs one of two agents, chosen by `agent` in `g8r.json`. Nothing
+outside `Sources/G8rCore/Agents/` names an agent's program or files.
+
+```swift
+// Sources/G8rCore/Agents/
+public enum Agent: String, CaseIterable {
+    case claudeCode = "claude", codex
+    public init?(name: String)
+    public var program: String
+    /// G8R_AGENT_COMMAND, or the program.
+    public func command(environment: [String: String]) -> String
+
+    public enum IdleSignal { case stopEvent, paneExit }
+    public struct Launch { public var command: String; public var idle: IdleSignal }
+    public func launch(command: String, name: String, prompt: String?, hookBinary: String?) -> Launch
+
+    public func install(into worktree: String, hookBinary: String) throws
+    public func uninstall(from worktree: String) throws
+    public func trustWorktree(_ worktree: String, createdFrom repoRoot: String, home: String) throws
+
+    public struct OneShot { public var executable: String; public var arguments: [String] }
+    public func oneShot(prompt: String, schema: String, schemaFile: String) -> OneShot
+    public func oneShotAnswer(from run: (status: Int32, output: String)) throws -> JSONValue
+}
+```
+
+| | Claude Code | Codex |
+|---|---|---|
+| Session | `claude --name <pane> '<prompt>'` | `codex -c 'notify=["<g8r-hook>", "codex-notify"]' '<prompt>'`; Codex has no flag that names a session |
+| Idle | Stop hook → `g8r-hook` → `stop` | `notify` on `agent-turn-complete` → `g8r-hook codex-notify <payload>` → `stop` |
+| Reported | edits, commands, stops | stops only; the session ends when its pane closes |
+| Installed in the worktree | hooks in `.claude/settings.local.json`, excluded from git | nothing; `notify` is set per launch, and `~/.codex` is never written |
+| Trust (auto-trust on) | `~/.claude.json`, only when the repo is trusted | nothing: Codex trusts a linked worktree through its main repository |
+| Plan extraction | `claude -p <prompt> --output-format json --json-schema <schema>`; answer under `structured_output` | `codex exec --json --ephemeral --sandbox read-only --output-schema <file> <prompt>`; answer is the last `agent_message` item's text. The schema is strict: every property required |
+
+Any other program (a stand-in script) gets the prompt as its last argument
+and exits its pane's shell with it; its exit is its going idle.
+
+Codex does have per-tool hooks (`PostToolUse` and others), but a project's
+hooks load only in a trusted project and each one must be approved in
+`/hooks`, so g8r doesn't install them. The map doesn't depend on edit
+events: for Codex, g8r records only each finished turn and the session's end.
+g8r never widens Codex's sandbox or approval policy.
 
 ### The map
 
@@ -303,7 +356,8 @@ Also answers requests.
 
 The `g8r-hook` CLI and the installer that writes g8r's hooks into a
 worktree's Claude Code settings. Observes edits, commands and stops. Blocks
-nothing.
+nothing. Run as `g8r-hook codex-notify <payload>`, it reads Codex's notify
+payload instead of standard input.
 
 - Needs: eventbus, eventlog, worktrees
 - Code: `Sources/g8r-hook/`, `Sources/G8rCore/Hooks/HookProcessor.swift`,
@@ -313,7 +367,8 @@ nothing.
 
 Marks worktrees g8r creates as trusted in Claude Code, only when the repo is
 already trusted and the user turned the setting on. Without it every new
-session stops at the trust prompt.
+session stops at the trust prompt. Codex needs nothing: it trusts a linked
+worktree through its main repository.
 
 - Needs: eventlog
 - Code: `Sources/G8rCore/Hooks/ClaudeTrust.swift`
@@ -449,8 +504,9 @@ public struct G8rConfig: Equatable {
 }
 ```
 
-The extractor runs `claude -p` with `--output-format json` and a JSON schema
-for the component list. Its cache is `<plan root>/.g8r/plans/<sha256>.json`.
+The extractor asks the configured agent (see Agent): `claude -p` with
+`--output-format json` and a JSON schema for the component list, or
+`codex exec --json --output-schema` with a strict version of that schema. Its cache is `<plan root>/.g8r/plans/<sha256>.json`.
 A loader given no extractor skips free-form docs and says so in `problems`.
 
 - Needs: globs
@@ -781,8 +837,9 @@ Building a node starts a session that belongs to that node and ends with it.
 creates `../<repo>-<id>` on `g8r/<id>`, branching from `g8r/integration`
 when it exists and from the plan root's `HEAD` otherwise. It runs
 `worktree_setup` there, trusts the worktree if the setting is on, installs
-the hooks, and opens a pane running
-`claude --name build-<id>` with the prompt as its first message. The pane's
+the hooks, and opens a pane running the agent's launch command
+(`claude --name build-<id>`, or `codex -c notify=…`) with the prompt as its
+first message. The pane's
 environment carries `G8R_PANE_ID=build-<id>` and `G8R_COMPONENT=<id>`.
 
 **Prompt.** Composed from the plan, never written by hand:
@@ -797,8 +854,9 @@ environment carries `G8R_PANE_ID=build-<id>` and `G8R_COMPONENT=<id>`.
    the trailer `G8r-Component: <id>`; list what was assumed in the commit
    body on lines starting `Assumed:`; stop when the done-when holds
 
-**End.** When the session goes idle, g8r checks the worktree: nothing is
-uncommitted, `build_command` succeeds, `test_command` succeeds. If the
+**End.** When the session goes idle (a `stop` from its pane), g8r checks
+the worktree: nothing is uncommitted, `build_command` succeeds,
+`test_command` succeeds. If the
 checks pass, g8r merges the branch into `g8r/integration`, closes the pane
 and removes the worktree; the branch is kept. If they fail, g8r types the
 failure into the session and waits for it to go idle again. After three
@@ -869,6 +927,21 @@ from the event log: a `build_started` with no `build_merged` or
   file, commits it with the trailer and exits, building a node ends with
   the commit on `g8r/integration`, the pane closed and the worktree gone.
   A node with something in `blockedBy` refuses to build.
+
+### agents: Agents
+
+Lets a build session run Claude Code or OpenAI's Codex CLI, through the one
+`Agent` contract above.
+
+- Needs: hooks, trust, plandoc, clickbuild
+- Changes: hooks, trust, plandoc, clickbuild, panes
+- Code: `Sources/G8rCore/Agents/`
+- Done when: with `"agent": "codex"`, a stand-in `codex` that writes a
+  file, commits it with the trailer and runs the notify command it was
+  given ends with the commit on `g8r/integration`, the pane closed and the
+  worktree gone. Claude Code's launches, hooks, trust and extraction are
+  what they were, and every earlier test passes. Both agents' launch
+  commands, installers, notify payloads and extraction output have tests.
 
 ## Retired
 

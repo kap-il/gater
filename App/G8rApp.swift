@@ -245,8 +245,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     static let autoTrustKey = "G8rAutoTrustWorktrees"
 
-    /// Off by default: G8r only marks its own worktrees trusted in
-    /// ~/.claude.json when the user turned this on.
+    /// Off by default: G8r only marks its own worktrees trusted by the
+    /// agent (~/.claude.json for Claude Code) when the user turned this on.
     private var autoTrustWorktrees: Bool {
         get { UserDefaults.standard.bool(forKey: Self.autoTrustKey) }
         set { UserDefaults.standard.set(newValue, forKey: Self.autoTrustKey) }
@@ -345,7 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let autoTrust = NSMenuItem(title: "Auto-trust Delegate Worktrees", action: #selector(toggleAutoTrust(_:)), keyEquivalent: "")
         autoTrust.target = self
         autoTrust.state = UserDefaults.standard.bool(forKey: Self.autoTrustKey) ? .on : .off
-        autoTrust.toolTip = "When a delegate opens, mark G8r's new worktree trusted in Claude Code (only if you already trust this repo), so it starts without the trust prompt."
+        autoTrust.toolTip = "When a session opens, mark G8r's new worktree trusted by the agent (only if you already trust this repo), so it starts without the trust prompt. Codex already trusts a worktree of a trusted repo."
         appMenu.addItem(autoTrust)
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide G8r", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")

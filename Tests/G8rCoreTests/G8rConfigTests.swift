@@ -108,4 +108,21 @@ final class G8rConfigTests: XCTestCase {
         try write("g8r.json", #"{"plans": []}"#)
         XCTAssertEqual(load().plans, [])
     }
+
+    // MARK: - Agent
+
+    func testTheAgentIsClaudeCodeUnlessSomethingSaysCodex() throws {
+        XCTAssertEqual(load().agent, .claudeCode)
+        try write("g8r.json", #"{"agent": "codex"}"#)
+        XCTAssertEqual(load().agent, .codex)
+        try write(".g8r/config.json", #"{"agent": "claude"}"#)
+        XCTAssertEqual(load().agent, .claudeCode, "the local file wins")
+        XCTAssertEqual(load(["G8R_AGENT": "codex"]).agent, .codex, "the environment wins over both")
+    }
+
+    func testAnAgentG8rDoesNotKnowLeavesTheDefault() throws {
+        try write("g8r.json", #"{"agent": "gemini"}"#)
+        XCTAssertEqual(load().agent, .claudeCode)
+        XCTAssertEqual(load(["G8R_AGENT": "nope"]).agent, .claudeCode)
+    }
 }

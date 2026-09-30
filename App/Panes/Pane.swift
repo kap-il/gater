@@ -2,7 +2,7 @@ import AppKit
 import G8rTerminal
 
 enum PaneRole: String {
-    /// One per worktree; runs a working `claude`.
+    /// One per worktree; runs a working agent session.
     case delegate
     /// One per component being built from the map; ends with the build.
     case build

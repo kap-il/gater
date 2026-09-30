@@ -171,7 +171,7 @@ final class MainWindowController: NSWindowController, NSTabViewDelegate {
         sideSplit.insertArrangedSubview(tile, at: tiles.count - 1) // above the filler
 
         if widenColumn {
-            // A delegate runs a full claude session; give its column room
+            // A delegate runs a full agent session; give its column room
             // between the tabs and the feed.
             sideSplit.isHidden = false
             rootSplit.layoutSubtreeIfNeeded()

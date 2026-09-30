@@ -14,28 +14,18 @@ public struct BuildLaunch: Equatable {
     public var command: String
     /// Set in the pane's environment: `G8R_PANE_ID` and `G8R_COMPONENT`.
     public var environment: [String: String]
-    /// The agent isn't Claude Code, so no Stop hook will say it went idle.
-    /// Its command exiting says so instead, and ends the pane's session,
-    /// so there is nothing left to type a failure into.
+    /// Nothing reports the agent going idle (see `Agent.IdleSignal`). Its
+    /// command exiting says so instead, and ends the pane's session, so
+    /// there is nothing left to type a failure into.
     public var idleOnExit: Bool
 
     public static func pane(for component: String) -> String { "build-\(component)" }
 
-    /// `claude --name build-<id> '<prompt>'`, the prompt as its first
-    /// message. Any other agent command gets the prompt as its last
-    /// argument, and the pane's shell exits with it.
+    /// Claude Code's launch: `claude --name build-<id> '<prompt>'`. See
+    /// `Agent.launch` for every agent's.
     public static func command(agent: String, pane: String, prompt: String) -> (command: String, idleOnExit: Bool) {
-        let program = agent.split(separator: " ").first.map { ($0 as NSString).lastPathComponent }
-        if program == "claude" {
-            return ("\(agent) --name \(shellQuote(pane)) \(shellQuote(prompt))", false)
-        }
-        // `exit` ends the shell before the terminal's `exec $SHELL` can
-        // replace it, so the session ends when the agent does.
-        return ("\(agent) \(shellQuote(prompt)); exit", true)
-    }
-
-    static func shellQuote(_ s: String) -> String {
-        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let launch = Agent.claudeCode.launch(command: agent, name: pane, prompt: prompt, hookBinary: nil)
+        return (launch.command, launch.idleOnExit)
     }
 }
 
@@ -96,7 +86,9 @@ public final class BuildCoordinator {
     }
 
     public let planRoot: String
+    private let agent: Agent
     private let agentCommand: String
+    private let hookBinary: String?
     private weak var host: BuildHost?
     private let record: (G8rEvent) -> Void
     private let scanner: SymbolScanning?
@@ -106,18 +98,26 @@ public final class BuildCoordinator {
     private var open: [String: Open] = [:]
 
     /// - Parameters:
+    ///   - agent: which agent `agentCommand` runs, which decides its flags
+    ///     and how its going idle is heard.
+    ///   - agentCommand: what `Agent.command(environment:)` gave.
+    ///   - hookBinary: `g8r-hook`'s path, for agents told about it on the
+    ///     command line (Codex's notify).
     ///   - scanner: reads the signatures of what a node needs; nil leaves
     ///     them out of the prompt.
     ///   - runner: a runner in the given directory.
     ///   - background, main: where checks and merges run, and where their
     ///     results are handled. Both run at once by default.
-    public init(planRoot: String, agentCommand: String, host: BuildHost,
+    public init(planRoot: String, agent: Agent = .default, agentCommand: String, hookBinary: String? = nil,
+                host: BuildHost,
                 record: @escaping (G8rEvent) -> Void, scanner: SymbolScanning? = nil,
                 runner: @escaping (String) -> CommandRunner = { ProcessRunner.runner(in: $0) },
                 background: @escaping (@escaping () -> Void) -> Void = { $0() },
                 main: @escaping (@escaping () -> Void) -> Void = { $0() }) {
         self.planRoot = planRoot
+        self.agent = agent
         self.agentCommand = agentCommand
+        self.hookBinary = hookBinary
         self.host = host
         self.record = record
         self.scanner = scanner
@@ -163,7 +163,7 @@ public final class BuildCoordinator {
         } ?? [:]
         let prompt = PromptComposer.prompt(for: component, in: map, interfaces: interfaces, base: base)
         let pane = BuildLaunch.pane(for: component)
-        let command = BuildLaunch.command(agent: agentCommand, pane: pane, prompt: prompt)
+        let command = agent.launch(command: agentCommand, name: pane, prompt: prompt, hookBinary: hookBinary)
         let launch = BuildLaunch(component: component, pane: pane, worktree: worktree,
                                  branch: GitWorktree.branch(forDelegate: component), base: base,
                                  prompt: prompt, command: command.command,
@@ -193,7 +193,8 @@ public final class BuildCoordinator {
 
     // MARK: - Events
 
-    /// A `stop` from a build pane means its session went idle. A closed
+    /// A `stop` from a build pane (Claude Code's Stop hook, Codex's notify,
+    /// or the pane's command exiting) means its session went idle. A closed
     /// build pane ends its session, wherever it was.
     public func handle(_ event: G8rEvent) {
         switch event.kind {
