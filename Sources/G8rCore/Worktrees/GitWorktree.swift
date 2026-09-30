@@ -124,6 +124,24 @@ public enum GitWorktree {
         return target
     }
 
+    /// Whether `path` is inside a git repository.
+    public static func isRepository(_ path: String) -> Bool {
+        repoRoot(containing: path) != nil
+    }
+
+    /// Makes `folder` a git repository (`git init`), with g8r's runtime
+    /// state in `.g8r/` excluded, so a build has something to branch from
+    /// once `commitFirst` has run. Stages nothing. A folder already inside
+    /// a repository is left as it is.
+    public static func initialize(_ folder: String) throws {
+        guard !isRepository(folder) else { return }
+        let result = try git(["init", "-q"], in: folder)
+        guard result.status == 0 else {
+            throw GitWorktreeError.gitFailed(arguments: ["init"], status: result.status, output: result.output)
+        }
+        try? exclude(pattern: "/.g8r/", comment: "G8r runtime state", in: folder)
+    }
+
     /// Makes a repository's first commit from `paths` alone (plan docs,
     /// usually), so builds have something to branch from. Nothing else in
     /// the folder is staged. Refuses a repository that already has commits.

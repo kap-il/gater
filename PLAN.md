@@ -57,8 +57,11 @@ build sessions ◄── clickbuild ◄─────────────�
 
 Two roots matter:
 
-- **Plan root:** the repo the user opened. Plan docs and `g8r.json` are read
-  from here, including edits that aren't committed yet.
+- **Plan root:** the folder the user opened: the root of the git repository
+  it is in, or the folder itself when it is in none. Plan docs and
+  `g8r.json` are read from here, including edits that aren't committed yet.
+  A folder outside git still gets its map, shell and event log; history and
+  builds are off until `git init` (see clickbuild).
 - **Code root:** where the code is measured. It is the integration worktree
   `../<repo>-integration` once that exists, and the plan root until then.
   Built components land on `g8r/integration`, so that is where the map has
@@ -416,7 +419,9 @@ Session and shell panes, the window, and the live event feed.
 
 ### app: App shell
 
-Picks the repo, opens the log, starts the bus, opens the window.
+Picks the folder, opens the log, starts the bus, opens the window. Any
+folder opens: inside a git repository the repo's root, otherwise the folder
+itself. The `g8r` command does the same.
 
 - Needs: panes, eventbus, eventlog, worktrees
 - Code: `App/G8rApp.swift`
@@ -573,7 +578,13 @@ Measures the base map: which files make up each component, which components
 use which, which tests cover them, and what can be built next.
 
 **Files.** The files are everything git tracks or would track in the code
-root (`git ls-files -co --exclude-standard`), minus the `ignore` globs. A
+root (`git ls-files -co --exclude-standard`), minus the `ignore` globs. In
+a code root that is in no git repository, the files come from a walk of the
+folder instead, skipping hidden entries and the folders `.git`, `.build`,
+`node_modules`, `dist`, `build`, `.next`, `target` and `vendor` at any
+depth, minus the same `ignore` globs. The map there has no `head` and an
+empty timeline, and the viewer's busy line says "Not a git repository:
+history and builds are off until `git init`." when nothing else is busy. A
 file belongs to the component whose `Code:` entry matches it; the longest
 match wins. An entry ending in `/` names a directory and matches everything
 under it. `Glob.matches` doesn't read it that way today, so codemap fixes
@@ -664,7 +675,10 @@ The `g8r-map` executable prints the map for a repo as JSON:
   three levels deep. A cycle in the plan ends with no wave for its members.
   `Glob.matches("a/b/", "a/b/c.swift")` is true. On this repo
   `swift run g8r-map` prints valid JSON in which every tracked source file
-  appears in exactly one node, and no node under Built is `planned`.
+  appears in exactly one node, and no node under Built is `planned`. On a
+  folder that isn't a repository the walk skips hidden entries, the skipped
+  folders and the `ignore` globs, and the map has the same files, tests and
+  edges as the same folder committed to git, with an empty timeline.
 
 ### drift: Drift edges
 
@@ -835,7 +849,11 @@ Building a node starts a session that belongs to that node and ends with it.
 
 **Start.** The node must be planned and have nothing in `blockedBy`. g8r
 creates `../<repo>-<id>` on `g8r/<id>`, branching from `g8r/integration`
-when it exists and from the plan root's `HEAD` otherwise. It runs
+when it exists and from the plan root's `HEAD` otherwise. A plan root with
+no commits is offered a first commit of its plan docs and `g8r.json`, and
+nothing else; one that is no git repository is offered "Initialize git and
+commit the plan" (`GitWorktree.initialize`, then `commitFirst`). Cancel
+changes nothing. It runs
 `worktree_setup` there, trusts the worktree if the setting is on, installs
 the hooks, and opens a pane running the agent's launch command
 (`claude --name build-<id>`, or `codex -c notify=…`) with the prompt as its

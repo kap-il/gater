@@ -48,7 +48,11 @@ public enum LivingMapBuilder {
 
     /// Everything git tracks or would track, less what `ignore` names.
     /// Deleted files git still tracks, and submodules, aren't files here.
+    /// A folder that isn't in a git repository is walked instead.
     static func trackedFiles(in codeRoot: String, ignoring ignore: [String]) throws -> [String] {
+        guard GitWorktree.repoRoot(containing: codeRoot) != nil else {
+            return walkedFiles(in: codeRoot, ignoring: ignore)
+        }
         let listed = try GitWorktree.git(["ls-files", "-z", "-co", "--exclude-standard"], in: codeRoot)
         guard listed.status == 0 else { throw BuildError.notARepository(codeRoot) }
         let root = URL(fileURLWithPath: codeRoot)
@@ -60,6 +64,37 @@ public enum LivingMapBuilder {
                                                   isDirectory: &isDirectory)
                 && !isDirectory.boolValue
         }.sorted()
+    }
+
+    /// Folders a walk never enters: build output and dependencies, which
+    /// a repository's `.gitignore` would usually leave out.
+    static let skippedFolders: Set<String> = [".git", ".build", "node_modules", "dist", "build", ".next",
+                                              "target", "vendor"]
+
+    /// The files under a folder that isn't a git repository, the way
+    /// `trackedFiles` would give them: relative paths, sorted, less hidden
+    /// entries, `skippedFolders` and what `ignore` names.
+    static func walkedFiles(in codeRoot: String, ignoring ignore: [String]) -> [String] {
+        let manager = FileManager.default
+        guard let walk = manager.enumerator(atPath: codeRoot) else { return [] }
+        var files: [String] = []
+        while let path = walk.nextObject() as? String {
+            let name = (path as NSString).lastPathComponent
+            let type = walk.fileAttributes?[.type] as? FileAttributeType
+            if name.hasPrefix(".") || (type == .typeDirectory && skippedFolders.contains(name)) {
+                if type == .typeDirectory { walk.skipDescendants() }
+                continue
+            }
+            if type == .typeDirectory || ignore.contains(where: { Glob.matches($0, path) }) { continue }
+            // A link counts when it leads to a file, as git would list it.
+            var isDirectory: ObjCBool = false
+            if type == .typeRegular
+                || manager.fileExists(atPath: (codeRoot as NSString).appendingPathComponent(path),
+                                      isDirectory: &isDirectory) && !isDirectory.boolValue {
+                files.append(path)
+            }
+        }
+        return files.sorted()
     }
 }
 

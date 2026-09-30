@@ -1,15 +1,19 @@
 #!/bin/sh
 # g8r [path]: opens the g8r app on the git repository you're in, or on the
-# one containing `path`.
+# one containing `path`. A folder outside any git repository is opened as it
+# is, with history and builds off until `git init`.
 #
-# Each repository gets its own app window and its own event socket, so two
-# repositories can be open at once without their hooks crossing.
+# Each folder gets its own app window and its own event socket, so two
+# can be open at once without their hooks crossing.
 set -eu
 
 dir="${1:-$PWD}"
-if ! root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)"; then
-  echo "g8r: $dir isn't inside a git repository" >&2
+if [ ! -d "$dir" ]; then
+  echo "g8r: $dir isn't a folder" >&2
   exit 1
+fi
+if ! root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)"; then
+  root="$(cd "$dir" && pwd -P)"
 fi
 
 for app in "/Applications/G8r.app" "$HOME/Applications/G8r.app"; do
