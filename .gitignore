@@ -11,3 +11,4 @@ Vendor/ghostty/GhosttyVT.xcframework
 .internal/
 planmap/map.js
 planmap/test.log
+dist/
