@@ -6,53 +6,57 @@
 <title>g8r living map</title>
 <style>
   :root {
-    --bg: #f6f6f3; --surface: #ffffff; --ink: #1b1b19; --muted: #6d6d67; --line: #dcdcd6;
-    --soft: #efefeb; --code: #f1f1ed;
-    --proven: #2f9e62; --built: #4f8a6b; --unproven: #8a8f98; --unplanned: #d9772b; --planned: #3b7cf0;
-    --blocked: #9aa9c4; --failing: #d64545; --building: #8b5cf6;
-    --confirmed: #a3a39c; --undeclared: #e0672f; --unrealized: #7d8cab; --neutral: #a3a39c;
-    --warn-bg: #fdf1e7;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #141413; --surface: #1d1d1b; --ink: #ecece6; --muted: #9a9a92; --line: #33332f;
-      --soft: #262623; --code: #252522;
-      --proven: #46b97a; --built: #6fa88a; --unproven: #8e939c; --unplanned: #ee9144; --planned: #6a9cf7;
-      --blocked: #66758f; --failing: #ef6a6a; --building: #a78bfa;
-      --confirmed: #5f5f59; --undeclared: #f08048; --unrealized: #8896b5; --neutral: #6a6a63;
-      --warn-bg: #33241a;
-    }
+    color-scheme: dark;
+    --bg: #07110B; --surface: #0C1A12; --soft: #122419; --code: #0A160F; --line: #1E3A28;
+    --ink: #CFDCC4; --muted: #7E9A7F; --accent: #2F6B45; --bright: #5E9E5A;
+    --olive: #556B2F; --teal: #2E5A4C; --bog: #4A5A2A;
+    --proven: #4E9A5B; --built: #5F7663; --unproven: #5F7663; --failing: #A94A35; --planned: #5E8C7A;
+    --blocked: #3E5446; --unplanned: #8C7A3A; --building: #7A9A2E;
+    --confirmed: #4F6B55; --undeclared: #8C7A3A; --unrealized: #5E8C7A; --neutral: #4F6B55;
+    --warn-bg: #1A1C0C;
+    --display: "Luminari", "Herculanum", "Trattatello", serif;
+    --body: "Hoefler Text", "Iowan Old Style", "Palatino", Georgia, serif;
+    --mono: "Courier New", Courier, monospace;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    margin: 0; color: var(--ink);
+    background: radial-gradient(ellipse at 30% 0%, #0F2418 0%, var(--bg) 60%) fixed, var(--bg);
+    font: 15px/1.45 var(--body);
     display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr) 410px;
     height: 100vh; overflow: hidden;
   }
-  code, pre, .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+  code, pre, .mono { font-family: var(--mono); font-size: 12px; }
+  .ascii { font-family: var(--mono); white-space: pre; line-height: 1.1; color: var(--bright); margin: 0;
+           background: none; border: 0; padding: 0; max-height: none; overflow: visible; word-break: normal; }
+  ::selection { background: var(--accent); color: var(--bg); }
 
   header {
-    grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
     padding: 10px 18px; border-bottom: 1px solid var(--line); background: var(--surface);
+    box-shadow: 0 1px 0 #07110B, 0 2px 0 var(--line);
   }
-  header h1 { font-size: 15px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
-  header .sub { color: var(--muted); font-size: 12px; }
+  header .mark { font-size: 10px; color: var(--bright); }
+  header h1 { font: 20px/1.1 var(--display); margin: 0; color: var(--ink); letter-spacing: .01em; }
+  header .sub { color: var(--muted); font-size: 12.5px; font-style: italic; }
   .actions { display: flex; gap: 6px; align-items: center; }
-  #busy { font-size: 12px; color: var(--muted); }
+  #busy { font-size: 12px; color: var(--building); font-family: var(--mono); }
   #busy:empty { display: none; }
+  #busy::before { content: "» "; }
   #problems {
-    flex-basis: 100%; font-size: 12px; background: var(--warn-bg); color: var(--ink);
-    border-left: 3px solid var(--unplanned); padding: 4px 10px; border-radius: 4px;
+    flex-basis: 100%; font-size: 12.5px; background: var(--warn-bg); color: var(--ink);
+    border-left: 3px solid var(--unplanned); padding: 4px 10px; border-radius: 3px;
   }
+  #problems::before { content: "⚠ "; color: var(--unplanned); }
   #problems[hidden] { display: none; }
   .legend { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
   .chip {
-    display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px;
-    border: 1px solid var(--line); background: var(--surface); color: var(--ink);
-    font-size: 12px; cursor: pointer; user-select: none;
+    display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 3px;
+    border: 1px solid var(--line); background: var(--code); color: var(--ink);
+    font-size: 12.5px; cursor: pointer; user-select: none;
   }
+  .chip:hover { border-color: var(--accent); }
   .chip.off { opacity: .4; }
   .chip i { width: 16px; height: 0; border-top: 2px solid; display: inline-block; }
   .chip i.dash { border-top-style: dashed; }
@@ -61,13 +65,16 @@
   #stage { position: relative; overflow: auto; padding: 14px 18px 0; }
   #chart { display: block; margin: 0 auto; }
   #empty { color: var(--muted); padding: 40px; text-align: center; }
+  #empty .ascii { display: inline-block; text-align: left; color: var(--accent); font-size: 13px; margin-bottom: 14px; }
+  #empty p { font: 18px var(--display); color: var(--muted); margin: 0; }
+  #empty[hidden] { display: none; }
   #time {
     position: sticky; bottom: 0; display: flex; align-items: center; gap: 12px;
     padding: 10px 4px 12px; background: linear-gradient(transparent, var(--bg) 35%);
   }
   #time[hidden] { display: none; }
-  #time input { flex: 1; accent-color: var(--planned); }
-  #time .label { width: 330px; font-size: 12px; color: var(--muted); white-space: nowrap;
+  #time input { flex: 1; accent-color: var(--accent); }
+  #time .label { width: 330px; font-size: 12.5px; color: var(--muted); white-space: nowrap;
                  overflow: hidden; text-overflow: ellipsis; }
   #time .label b { color: var(--ink); font-weight: 600; }
 
@@ -75,72 +82,78 @@
     border-left: 1px solid var(--line); background: var(--surface); overflow-y: auto;
     padding: 18px 20px 40px;
   }
-  aside h2 { font-size: 18px; margin: 0 0 2px; letter-spacing: -.01em; }
+  aside .crest { font-size: 12px; color: var(--bright); margin-bottom: 8px; }
+  aside h2 { font: 22px/1.25 var(--display); margin: 0 0 4px; color: var(--ink); }
   aside h3 {
-    font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
-    margin: 22px 0 8px; font-weight: 600;
+    font: 12px/1 var(--mono); color: var(--bright); white-space: nowrap; overflow: hidden;
+    margin: 24px 0 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
   }
+  aside h3::before { content: "══╡ "; color: var(--teal); }
+  aside h3::after { content: " ╞════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════"; color: var(--teal); }
   aside p { margin: 6px 0; }
   .pill {
-    display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
-    font-weight: 600; color: #fff; vertical-align: 2px; margin-left: 6px;
+    display: inline-block; padding: 1px 8px; border-radius: 3px; font: 600 11px var(--body);
+    color: var(--bg); vertical-align: 4px; margin-left: 8px;
   }
   .muted { color: var(--muted); }
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 14px 0 4px; }
-  .stat { background: var(--soft); border-radius: 8px; padding: 8px 10px; }
-  .stat b { display: block; font-size: 17px; font-weight: 650; }
-  .stat span { font-size: 11px; color: var(--muted); }
+  .stat { background: var(--soft); border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; }
+  .stat b { display: block; font: 700 19px var(--mono); color: var(--bright); }
+  .stat span { font-size: 11.5px; color: var(--muted); }
   .row {
     display: flex; align-items: baseline; gap: 8px; padding: 5px 8px; margin: 0 -8px;
-    border-radius: 6px; cursor: pointer;
+    border-radius: 3px; cursor: pointer;
   }
   .row:hover { background: var(--soft); }
   .row .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; transform: translateY(-1px); }
   .row .who { white-space: nowrap; }
-  .row .why { color: var(--muted); font-size: 12px; margin-left: auto; text-align: right; min-width: 0; }
+  .row .why { color: var(--muted); font-size: 12.5px; margin-left: auto; text-align: right; min-width: 0; }
   .row .why.mono { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
-  .tag { font-size: 11px; padding: 0 6px; border-radius: 4px; border: 1px solid; white-space: nowrap; }
-  .file { padding: 6px 0; border-top: 1px solid var(--line); }
+  .tag { font-size: 11.5px; padding: 0 6px; border-radius: 3px; border: 1px solid; white-space: nowrap; }
+  .file { padding: 6px 0; border-top: 1px dashed var(--line); }
   .file:first-of-type { border-top: 0; }
-  .file .path { cursor: pointer; word-break: break-all; }
-  .file .path:hover { text-decoration: underline; }
+  .file .path { cursor: pointer; word-break: break-all; color: var(--ink); }
+  .file .path:hover { text-decoration: underline; color: var(--bright); }
   .syms { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
-  .sym { background: var(--code); border-radius: 4px; padding: 0 6px; font-size: 11px; }
+  .sym { background: var(--code); border: 1px solid var(--line); border-radius: 3px; padding: 0 6px; font-size: 11px; }
   .sym em { color: var(--muted); font-style: normal; }
   pre {
-    background: var(--code); border-radius: 8px; padding: 10px 12px; margin: 6px 0;
+    background: var(--code); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; margin: 6px 0;
     white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow: auto;
   }
-  .doc { white-space: pre-wrap; font-size: 13px; color: var(--ink); border-left: 2px solid var(--line);
+  .doc { white-space: pre-wrap; font-size: 14px; color: var(--ink); border-left: 2px solid var(--olive);
          padding-left: 12px; max-height: 260px; overflow: auto; }
-  .note { font-size: 12px; background: var(--soft); border-radius: 6px; padding: 6px 10px; }
+  .note { font-size: 13px; background: var(--soft); border-left: 2px solid var(--unplanned); border-radius: 3px; padding: 6px 10px; }
   button.primary {
-    border: 0; background: var(--planned); color: #fff; border-radius: 8px; padding: 7px 14px;
-    font-weight: 600; font-size: 13px; cursor: pointer;
+    border: 1px solid var(--bright); background: var(--accent); color: var(--ink); border-radius: 4px; padding: 7px 16px;
+    font: 15px var(--display); cursor: pointer; box-shadow: 0 0 0 3px var(--bg), 0 0 0 4px var(--line);
   }
-  button.primary[disabled] { background: var(--blocked); cursor: not-allowed; }
+  button.primary:hover { background: var(--bright); color: var(--bg); }
+  button.primary[disabled] { background: var(--blocked); border-color: var(--line); color: var(--ink); opacity: .7; cursor: not-allowed; }
   button.ghost {
-    border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 7px;
-    padding: 4px 10px; font-size: 12px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--code); color: var(--ink); border-radius: 3px;
+    padding: 4px 10px; font: 13px var(--body); cursor: pointer;
   }
+  button.ghost:hover { border-color: var(--accent); color: var(--bright); }
 
   /* chart */
   .node { cursor: pointer; transition: opacity .18s; }
-  .node rect.box { fill: var(--surface); stroke: var(--line); stroke-width: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.08)); }
+  .node rect.box { fill: var(--surface); stroke: var(--line); stroke-width: 1; filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)); }
   .node rect.bar { stroke: none; }
-  .node text.name { font-size: 12.5px; font-weight: 620; fill: var(--ink); }
-  .node text.meta { font-size: 10.5px; fill: var(--muted); }
-  .node.planned rect.box { fill: var(--bg); stroke-dasharray: 5 4; stroke: var(--planned); filter: none; }
+  .node text.name { font: 15px var(--display); fill: var(--ink); }
+  .node text.meta { font: italic 11.5px var(--body); fill: var(--muted); }
+  .node:hover rect.box { stroke: var(--accent); }
+  .node.planned rect.box { fill: var(--code); stroke-dasharray: 5 4; stroke: var(--planned); filter: none; }
   .node.planned.blocked rect.box { stroke: var(--blocked); }
   .node.unplanned rect.box { stroke: var(--unplanned); stroke-dasharray: 2 3; }
   .node.failing rect.box { stroke: var(--failing); }
   .node.building rect.box { stroke: var(--building); stroke-width: 1.6; }
-  .node.selected rect.box { stroke: var(--ink); stroke-width: 2; stroke-dasharray: none; }
+  .node.selected rect.box { stroke: var(--bright); stroke-width: 2; stroke-dasharray: none; }
   .node.blast rect.box { stroke: var(--failing); stroke-width: 2; stroke-dasharray: none; }
   .node.dim, .edge.dim { opacity: .13; }
   .node.gone, .edge.gone { opacity: 0; visibility: hidden; pointer-events: none; }
   .edge { transition: opacity .18s; }
-  .edge path.line { fill: none; stroke-width: 1.4; opacity: .55; }
+  .edge path.line { fill: none; stroke-width: 1.4; opacity: .7; }
   .edge path.hit { fill: none; stroke: transparent; stroke-width: 12; }
   .edge.hot path.line { stroke-width: 2.2; opacity: 1; }
   .edge.neutral path.line { stroke: var(--neutral); }
@@ -148,19 +161,25 @@
   .edge.undeclared path.line { stroke: var(--undeclared); }
   .edge.unrealized path.line { stroke: var(--unrealized); stroke-dasharray: 6 4; }
   .edge.planned path.line { stroke: var(--planned); stroke-dasharray: 2 4; }
-  .layer-label { font-size: 10px; fill: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .layer-label { font: 11px var(--mono); fill: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
   #tip {
-    position: fixed; pointer-events: none; background: var(--ink); color: var(--bg);
-    padding: 6px 9px; border-radius: 7px; font-size: 12px; max-width: 320px; display: none; z-index: 5;
+    position: fixed; pointer-events: none; background: var(--soft); color: var(--ink); border: 1px solid var(--accent);
+    padding: 6px 9px; border-radius: 4px; font-size: 13px; max-width: 320px; display: none; z-index: 5;
+    box-shadow: 0 4px 14px rgba(0,0,0,.5);
   }
   @media (max-width: 900px) {
     body { grid-template-columns: 1fr; grid-template-rows: auto 60vh auto; height: auto; overflow: auto; }
     aside { border-left: 0; border-top: 1px solid var(--line); }
+    header .mark { display: none; }
   }
 </style>
 </head>
 <body>
 <header>
+  <pre class="ascii mark" aria-hidden="true">  ___ ___ ___
+ / __( _ ) _ \
+| (_ / _ \   /
+ \___\___/_|_\</pre>
   <div>
     <h1 id="title">Living map</h1>
     <div class="sub" id="subtitle">Waiting for the map…</div>
@@ -176,7 +195,17 @@
 
 <main id="stage">
   <svg id="chart"></svg>
-  <div id="empty" hidden>No components in the plan yet.</div>
+  <div id="empty" hidden><pre class="ascii" aria-hidden="true">
+                 .-._   _ _ _ _ _ _ _ _
+      .-''-.__.-'00  '-' ' ' ' ' ' ' ' '-.
+     '.___ '    .   .--_'-' '-' '-' _'-' '._
+      V: V 'vv-'   '_   '.       .'  _..' '.'.
+        '=.____.=_.--'   :_.__.__:_   '.   : :
+                (((____.-'        '-.  /   : :
+                                  (((-'\ .' /
+                                _____..'  .'
+                               '-._____.-'</pre>
+    <p>No components in the plan yet.</p></div>
   <div id="time" hidden>
     <button class="ghost" id="play" title="Replay the build">▶ Replay</button>
     <input id="scrub" type="range" min="0" step="1">
@@ -467,6 +496,9 @@
       `<span class="why mono">${esc(short((e.symbols || []).join(", "), 30))}</span></div>`;
     const drifted = M.edges.some((e) => e.kind);
     return `
+      <pre class="ascii crest" aria-hidden="true">        _.-~~-.__
+ _-~-_ /  o   ~ \\~-._   g8r
+(____  ~-~-~-~-~-~--~-'  living map</pre>
       <h2>${esc(M.repo)}</h2>
       <p class="muted">A map of the code, organised by what the plans describe. Status, files and
       edges are measured from the repo${M.head ? ` at <span class="mono">${esc(M.head)}</span>` : ""}. Click any node.</p>
@@ -579,6 +611,10 @@
       return `<span class="chip${state.kinds[k] ? "" : " off"}" data-kind="${k}"><i class="${style}" style="border-color:${css(v)}"></i>${text} ` +
              `<span class="muted">${M.edges.filter((e) => look(e) === k).length}</span></span>`;
     }).join("") +
+      ((g) => g ? `<span class="chip" style="cursor:default" title="Node status">${g}</span>` : "")(
+      [["proven","◆"],["unproven","◇"],["failing","✗"],["building","⚙"],["planned","○"],["unplanned","?"]]
+        .filter(([k]) => M.nodes.some((n) => n.status === k || (k === "unproven" && n.status === "built")))
+        .map(([k, g]) => `<span style="color:${css(STATUS[k][1])}"><span class="mono">${g}</span> ${STATUS[k][0]}</span>`).join(" ")) +
       (M.edges.some(quiet) ? `<span class="chip${state.every ? "" : " off"}" id="every" title="Also draw edges the plan already implies by a longer route">every edge</span>` : "");
     document.querySelectorAll("[data-kind]").forEach((c) => c.addEventListener("click", () => {
       state.kinds[c.dataset.kind] = !state.kinds[c.dataset.kind];
