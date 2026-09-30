@@ -1,0 +1,23 @@
+#!/bin/sh
+# g8r [path]: opens the g8r app on the git repository you're in, or on the
+# one containing `path`.
+#
+# Each repository gets its own app window and its own event socket, so two
+# repositories can be open at once without their hooks crossing.
+set -eu
+
+dir="${1:-$PWD}"
+if ! root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)"; then
+  echo "g8r: $dir isn't inside a git repository" >&2
+  exit 1
+fi
+
+for app in "/Applications/G8r.app" "$HOME/Applications/G8r.app"; do
+  if [ -d "$app" ]; then
+    socket="$HOME/.g8r/$(printf %s "$root" | shasum | cut -c1-12).sock"
+    exec open -n -a "$app" --env "G8R_COLLECTOR=$socket" --args "$root"
+  fi
+done
+
+echo "g8r: G8r.app isn't in /Applications. Build it with scripts/package-app.sh and move dist/G8r.app there." >&2
+exit 1
