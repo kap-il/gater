@@ -10,7 +10,7 @@
 <style>
   :root {
     color-scheme: dark;
-    --bg: #07110B; --surface: #0C1A12; --soft: #122419; --code: #0A160F; --line: #1E3A28;
+    --bg: #07110B; --map: #041A0B; --node: #0A2814; --node-planned: #062010; --surface: #0C1A12; --soft: #122419; --code: #0A160F; --line: #1E3A28;
     --ink: #CFDCC4; --muted: #7E9A7F; --accent: #2F6B45; --bright: #5E9E5A;
     --olive: #556B2F; --teal: #2E5A4C; --bog: #4A5A2A;
     --proven: #4E9A5B; --built: #5F7663; --unproven: #5F7663; --failing: #A94A35; --planned: #5E8C7A;
@@ -28,7 +28,7 @@
   html, body { height: 100%; }
   body {
     margin: 0; color: var(--ink);
-    background: radial-gradient(ellipse at 30% 0%, #0F2418 0%, var(--bg) 60%) fixed, var(--bg);
+    background: var(--bg);
     font: 13.5px/1.5 var(--body);
     display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr) 410px;
     height: 100vh; overflow: hidden;
@@ -68,7 +68,7 @@
   .chip i.dash { border-top-style: dashed; }
   .chip i.dot { border-top-style: dotted; }
 
-  #stage { position: relative; overflow: auto; padding: 14px 18px 0; }
+  #stage { position: relative; overflow: auto; padding: 14px 18px 0; background: var(--map); }
   #chart { display: block; margin: 0 auto; }
   #empty { color: var(--muted); padding: 40px; text-align: center; }
   #empty .ascii { display: inline-block; text-align: left; color: var(--accent); font-size: 13px; margin-bottom: 14px; }
@@ -76,7 +76,7 @@
   #empty[hidden] { display: none; }
   #time {
     position: sticky; bottom: 0; display: flex; align-items: center; gap: 12px;
-    padding: 10px 4px 12px; background: linear-gradient(transparent, var(--bg) 35%);
+    padding: 10px 4px 12px; background: var(--map);
   }
   #time[hidden] { display: none; }
   #time input { flex: 1; accent-color: var(--accent); }
@@ -144,12 +144,12 @@
 
   /* chart */
   .node { cursor: pointer; transition: opacity .18s; }
-  .node rect.box { fill: var(--surface); stroke: var(--line); stroke-width: 1; filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)); }
+  .node rect.box { fill: var(--node); stroke: var(--line); stroke-width: 1; filter: drop-shadow(0 2px 3px rgba(0,0,0,.45)); }
   .node rect.bar { stroke: none; }
   .node text.name { font: 600 13px var(--display); letter-spacing: .01em; fill: var(--ink); }
   .node text.meta { font: italic 11px var(--body); fill: var(--muted); }
   .node:hover rect.box { stroke: var(--accent); }
-  .node.planned rect.box { fill: var(--code); stroke-dasharray: 5 4; stroke: var(--planned); filter: none; }
+  .node.planned rect.box { fill: var(--node-planned); stroke-dasharray: 5 4; stroke: var(--planned); filter: none; }
   .node.planned.blocked rect.box { stroke: var(--blocked); }
   .node.unplanned rect.box { stroke: var(--unplanned); stroke-dasharray: 2 3; }
   .node.failing rect.box { stroke: var(--failing); }
