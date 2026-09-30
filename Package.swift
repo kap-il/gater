@@ -9,7 +9,8 @@ let package = Package(
     products: [
         .library(name: "G8rCore", targets: ["G8rCore"]),
         .library(name: "G8rSymbols", targets: ["G8rSymbols"]),
-        .executable(name: "g8r-hook", targets: ["g8r-hook"])
+        .executable(name: "g8r-hook", targets: ["g8r-hook"]),
+        .executable(name: "g8r-map", targets: ["g8r-map"])
     ],
     dependencies: [
         .package(url: "https://github.com/ChimeHQ/SwiftTreeSitter", exact: "0.9.0"),
@@ -46,6 +47,11 @@ let package = Package(
                 .product(name: "TreeSitterSwift", package: "tree-sitter-swift"),
             ],
             path: "Sources/G8rSymbols"
+        ),
+        .executableTarget(
+            name: "g8r-map",
+            dependencies: ["G8rSymbols"],
+            path: "Sources/g8r-map"
         ),
         .testTarget(
             name: "G8rSymbolsTests",

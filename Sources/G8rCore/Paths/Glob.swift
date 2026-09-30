@@ -3,10 +3,12 @@ import Foundation
 /// Path globs, as plan docs use them to say where a component's code
 /// lives (e.g. `src/auth/**`, `*.ts`).
 /// `**` crosses directories, `*` and `?` stay within one path segment.
+/// A pattern ending in `/` names a directory and covers everything under
+/// it, the way plan docs write `Code:` entries.
 public enum Glob {
     public static func matches(_ pattern: String, _ path: String) -> Bool {
         var regex = "^"
-        var chars = Array(pattern)
+        var chars = Array(pattern.hasSuffix("/") ? pattern + "**" : pattern)
         if chars.first == "/" { chars.removeFirst() }
         var i = 0
         while i < chars.count {
