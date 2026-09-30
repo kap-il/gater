@@ -1,145 +1,137 @@
 # g8r
 
-A living map of your codebase, organised by the components your plans describe. Click a component to see its plan, its files and what it depends on. Click one that isn't built yet to start building it.
+g8r is a macOS terminal with a living map of your codebase beside it. The map is drawn from your plan docs. Each component is a node, and its status, files and edges are measured from the code, git and test runs. A component that isn't built yet can be built from the map, in its own agent session and worktree.
 
-g8r (formerly Gater) is a macOS app. It runs stock Claude Code or Codex sessions in its own terminal panes and watches what they do; it never changes how the agent works.
+![g8r's map of its own repository, replaying its git history](docs/demo/map.gif)
 
-```
-┌──────────────────────┬──────────────────┬───────────────────┐
-│ map  shell           │ build: auth      │  Events           │
-│                      │  (claude)        │  15:02 edit …     │
-│  living map          ├──────────────────┤  15:02 command …  │
-│                      │ build: dash      │  15:03 stop …     │
-│                      │  (claude)        │                   │
-└──────────────────────┴──────────────────┴───────────────────┘
-```
+The terminal runs on [libghostty-vt](https://github.com/ghostty-org/ghostty). The agents are stock [Claude Code](https://code.claude.com) or [Codex](https://github.com/openai/codex): g8r watches what they do and doesn't change how they work. The design, and the plan g8r is built from, are in [PLAN.md](PLAN.md).
 
-## Status
+## Install
 
-The map exists today as a prototype in `planmap/`, run against g8r's own source. The app is the workbench the map will move into: terminal panes, worktrees, and a log of what each session did. `planmap/PLAN.md` is the plan for joining the two.
-
-## The map
-
-```sh
-python3 planmap/build_map.py --test   # measure the repo, run the tests
-open planmap/index.html
-```
-
-- **Components, not tasks.** Nodes come from plan docs and stay after the plan ships.
-- **Measured.** Files, lines, tests and edges are read from the repo. A node is "built, tests pass" because the tests passed.
-- **Plan against code.** Edges are drawn as confirmed, in the code but not the plan, or in the plan but not the code. Code no plan mentions shows up as its own node.
-- **Plans as overlays.** Unbuilt components appear dashed, in build order, with what they would change outlined.
-- **Build prompts.** An unbuilt node composes a prompt from its plan section and the real signatures of what it depends on.
-- **Replay.** The slider rebuilds the map commit by commit.
-
-`planmap/plan.json` holds the components each plan doc declares. Everything else is measured by `build_map.py`.
-
-## The app
-
-- **Terminal.** A native AppKit terminal on [libghostty-vt](https://github.com/ghostty-org/ghostty), with CoreText rendering, selection, scrollback and mouse reporting.
-- **Panes.** One session in the repo itself, plus one per worktree. New Delegate creates `../<repo>-<name>` on branch `g8r/<name>` and starts the agent there (`claude --name delegate-<name>`, or `codex`).
-- **Agents.** Type `claude` or `codex` (with any arguments) in any g8r pane, the shell g8r opens on included; g8r wires it up. Shims first on the pane's `PATH` start the real program with g8r's hooks (`--settings`) or Codex's `notify` (`-c`), so the session shows up in the event feed ("claude started in shell 1") and the log. Build uses the agent you last started this way; until you start one, Build is off.
-- **Plan skill.** Agents started in g8r know how to write plans g8r reads: Claude Code gets the `g8r-plan` skill as a session plugin, and Codex is pointed at the same file.
-- **Event log.** Claude Code's hooks report each session's edits, shell commands and stops to `.g8r/events.jsonl`; Codex's `notify` reports each finished turn. They only observe; nothing blocks a tool call.
-- **Libraries, not yet wired into the app:** the tree-sitter symbol engine (TypeScript, TSX, JavaScript), the language-server reference engine, and dependency-ordered integration into `g8r/integration` with a test run after each merge.
-
-## Requirements
-
-- macOS on Apple Silicon, Xcode / Swift 6
-- [Zig](https://ziglang.org) 0.16 (builds libghostty-vt)
-- An agent: [Claude Code](https://code.claude.com) or OpenAI's [Codex CLI](https://github.com/openai/codex). Type `claude` or `codex` in g8r's shell; g8r wires it up
-- Optional: [Bun](https://bun.sh), to install TypeScript 7 for the reference engine
-
-## Setup
+You need macOS on Apple Silicon, Xcode with Swift 6, and [Zig](https://ziglang.org) 0.16 (it builds libghostty-vt).
 
 ```sh
 git clone --recurse-submodules https://github.com/kap-il/gater.git g8r
 cd g8r
-scripts/build-ghostty.sh          # builds Vendor/ghostty/GhosttyVT.xcframework
-swift build
-
-# Optional, TypeScript 7 for the reference engine, kept out of your home folder:
-mkdir -p ~/.g8r/tools && cd ~/.g8r/tools
-[ -f package.json ] || echo '{"name":"g8r-tools","private":true}' > package.json
-bun add typescript@^7
+scripts/build-ghostty.sh        # builds Vendor/ghostty/GhosttyVT.xcframework
+scripts/package-app.sh          # builds dist/G8r.app
+cp -R dist/G8r.app /Applications/
+ln -s "$PWD/scripts/g8r" /usr/local/bin/g8r   # or any folder on your PATH
 ```
 
-## Running
+The app is signed ad hoc, so it runs on the machine that built it. To wire up an agent you also need Claude Code or the Codex CLI on your `PATH`.
 
-g8r opens any folder. Inside a git repository it opens the repository's root; outside one, the nearest folder above it (below your home folder) with a `PLAN.md`, `plans/`, `docs/plans/` or `g8r.json`; otherwise the folder as it is, with the map, shell and event log working and history and builds off until `git init`.
+## Using it
 
-The map follows you. `cd` into another project in the shell you're typing in, or click into a shell that is in one, and within a second the map, the window title, Build, Run tests and the event log switch to that project. `cd` within a project changes nothing, and delegate and build panes never move it. Build sessions already running carry on in the project they started in. ⌘T opens a new shell in the folder the current shell is in. Building from the map needs a commit to branch from: in a repository with none, or a folder with no git, g8r offers to initialize git (if needed) and commit only the plan docs and `g8r.json`.
+Run `g8r` to open the folder you're in, or `g8r <path>`. Opened from Finder or the Dock, the app starts in your home folder.
 
-```sh
-cd path/to/your-folder
-swift run --package-path path/to/g8r G8r
+g8r opens on a shell, which plays its banner. The map is the first tab, on ⌘1.
+
+![The startup banner playing in g8r's first shell](docs/demo/startup.gif)
+
+**The map follows your `cd`.** The project is wherever the active shell is: the top level of its git repository, else the nearest folder above it holding a plan (`PLAN.md`, `plans/`, `docs/plans/` or `g8r.json`), else the folder itself. `cd` into another project and the map, window title and event log switch to it. A `cd` within the same project changes nothing.
+
+![A cd into a project, and the map switching to it](docs/demo/follow.gif)
+
+**Wiring an agent.** Type `claude` or `codex` in a g8r shell, with any arguments. g8r starts the real program with its hooks, so the session's edits, commands and turn ends show up in the Events feed, and gives it the `g8r-plan` skill, which teaches the plan format. Nothing is written to your repository, `~/.claude` or `~/.codex`; it is all passed per launch.
+
+**Plans.** A plan in g8r's format is mapped directly, with no model involved:
+
+```markdown
+## search: Search
+Finds notes by words in their title or body.
+- Needs: store
+- Code: src/search.py
+- Done when: a query returns matching notes, best first.
 ```
 
-| Shortcut | |
+Any level 2 to 4 heading shaped `id: Name` is a component. A free-form plan is read once by the agent and the result cached. A wired agent can also write a plan in this format for you.
+
+**The map.** Each node is a component, with status measured from the code and tests rather than checkboxes. Edges compare the plan with the code: in both, in the code only, or in the plan only. Code no plan mentions gets its own node. Nodes are laid out in build order, unbuilt ones grayed out. The Replay slider rebuilds the map commit by commit.
+
+**Build.** Select an unbuilt node and click Build. This needs a wired agent. g8r starts a fresh session in its own worktree, `../<repo>-<id>` on branch `g8r/<id>`, checks the result, merges it into `g8r/integration`, then closes the pane and removes the worktree. Merging `g8r/integration` into your branch is up to you. In a repository with no commits, or a folder without git, g8r offers to commit just the plan first.
+
+**Change this.** On a built node, type what you want changed. g8r sends it to your wired agent along with the node's context.
+
+![A planned node offering Build, and a built node with the change box](docs/demo/build.gif)
+
+**Folders without git** still get a map, a shell and an event log. History and builds turn on after `git init`.
+
+## Shortcuts
+
+| Keys | |
 |---|---|
-| ⌘⇧D | New delegate (asks for a name) |
+| ⌘1–⌘9 | Switch tabs (⌘1 is the map) |
 | ⌘T | New shell, in the current shell's folder |
+| ⌘⇧D | New delegate session in its own worktree |
 | ⌘W | Close the focused pane |
-| ⌘1–⌘9 | Focus tabs, then delegate boxes |
-| ⌘C / ⌘V | Copy selection / paste |
+| ⌘C / ⌘V | Copy / paste |
+| ⌘↩ | Send the change box to your agent |
 
-Delegate boxes collapse from their title bar. **G8r → Auto-trust Delegate Worktrees** (off by default) marks worktrees g8r creates as trusted in Claude Code, only if you already trust the repo, so new sessions skip the trust prompt. Codex needs nothing: it already trusts a worktree of a repo you trust.
+## Configuration
 
-### Per-repo config
-
-`<repo>/.g8r/config.json`:
+`g8r.json` at the project root (tracked), or `.g8r/config.json` (local, overrides it key by key):
 
 ```json
-{ "test_command": "npm test", "agent": "codex" }
+{ "plans": ["PLAN.md"], "build_command": "swift build", "test_command": "swift test", "agent": "claude" }
 ```
 
-`test_command` is used by the integrator after each merge; `G8R_TEST_COMMAND` overrides it. `agent` is optional: `claude` (the default) or `codex`, the agent g8r starts on its own to read free-form plans (and for New Delegate before you have started one). It doesn't choose the build agent, which is whichever you last started in a pane. `G8R_AGENT` overrides it. `g8r.json` at the repo root takes the same keys and is tracked; `.g8r/config.json` overrides it.
+`agent` picks which agent reads free-form plans; Build always uses the agent you last started in a shell. Every key is in [PLAN.md](PLAN.md#g8rjson).
+
+| Variable | |
+|---|---|
+| `G8R_AGENT` | `claude` or `codex`; overrides `agent` |
+| `G8R_BUILD_COMMAND`, `G8R_TEST_COMMAND` | override `build_command` / `test_command` |
+| `G8R_AGENT_COMMAND` | run a different program in session panes |
+| `G8R_COLLECTOR` | event socket path (`scripts/g8r` sets one per folder) |
+| `G8R_NO_BANNER` | skip the banner; `G8R_BANNER_DELAY` sets its frame time |
+| `G8R_TSC` | a TypeScript 7 binary for the reference engine |
+| `G8R_SNAPSHOT`, `G8R_SNAPSHOT_MAP` | write a PNG of the window or the map after 2 s |
+| `G8R_RECORD` | write PNG frames to a folder (`G8R_RECORD_SECONDS`, `G8R_RECORD_MAP_AT`); see `scripts/demo/` |
+| `G8R_DEBUG_CD`, `G8R_DEBUG_BUILD`, `G8R_DEBUG_DELEGATES` | debug runs: `cd` in the first shell, build a node, open delegates |
+
+Snapshot and recording runs never bring the app to the front.
 
 ## What g8r writes
 
-In the project root, the folder you open and each one the map follows you to (excluded via `.git/info/exclude` in a git repository, so `git status` stays clean):
-
-| Path | |
+| Where | What |
 |---|---|
-| `.g8r/events.jsonl` | the event log |
-
-Hooks are passed to each Claude Code session with `--settings`; hooks an older g8r wrote to a worktree's `.claude/settings.local.json` are taken out when a session opens there.
-
-Next to it: `../<repo>-<name>` worktrees. In your home folder: `~/.g8r/` (event socket, tools, and `~/.g8r/shims/`: the `claude` and `codex` shims, a zsh startup file that keeps them first on `PATH`, and the plan skill) and, only with auto-trust on, trust entries in `~/.claude.json`. `~/.claude` and `~/.codex` are never written: Codex's `notify` and instructions are passed per launch with `-c`. Passing `-c developer_instructions` replaces any your Codex config sets, for that session.
+| `<project>/.g8r/` | `events.jsonl` (the event log), test results, the free-form plan cache. Excluded from git via `.git/info/exclude` |
+| `../<repo>-<id>`, `../<repo>-integration` | build worktrees, on `g8r/<id>` and `g8r/integration` |
+| `~/.g8r/` | event sockets, the agent shims and skill (`shims/`), optional tools |
+| `~/.claude.json` | trust entries for g8r's worktrees, only with **G8r → Auto-trust Delegate Worktrees** on |
 
 ## Repository layout
 
 | Path | |
 |---|---|
-| `Sources/G8rCore` | event log and bus, hooks, worktrees, integration, language-server client, path globs. No UI, Linux-buildable |
-| `Sources/G8rSymbols` | tree-sitter symbol engine, diffs, reference engine |
-| `Sources/G8rTerminal` | libghostty-vt terminal core, PTY, sessions |
-| `Sources/G8rPTY` | forkpty/exec in C |
-| `Sources/g8r-hook` | the hook CLI: Claude Code's hooks, Codex's notify, and the agent shims |
-| `App/` | the macOS app: terminal view, panes, event feed |
-| `planmap/` | the map prototype and the plan |
-| `Vendor/ghostty` | Ghostty submodule (pinned) + build output |
+| `App/` | the macOS app: terminal view, panes, map view, event feed |
+| `Sources/G8rCore` | plans, the code map, builds, worktrees, events, agents. No UI |
+| `Sources/G8rCore/CodeMap/Viewer` | the map page, one self-contained HTML file |
+| `Sources/G8rSymbols` | tree-sitter symbols (Swift, TypeScript, JavaScript) and references |
+| `Sources/G8rTerminal`, `Sources/G8rPTY` | the libghostty-vt terminal core and the PTY |
+| `Sources/g8r-hook` | the hook CLI the agents and shims call |
+| `Sources/g8r-map` | the map as JSON or HTML: `swift run g8r-map --html .` |
+| `scripts/` | build, package, the `g8r` launcher, demo capture |
+| `Vendor/ghostty` | the Ghostty submodule |
 
 ## Development
 
 ```sh
+scripts/build-ghostty.sh   # once
+swift build
 swift test
 ```
 
-The language-server tests need TypeScript 7 in `~/.g8r/tools` and skip otherwise.
-
-| Variable | |
-|---|---|
-| `G8R_AGENT` | `claude` or `codex`; overrides `agent` in `g8r.json` and `.g8r/config.json` (plan reading and New Delegate, not Build) |
-| `G8R_AGENT_COMMAND` | run something other than `claude` / `codex` in session panes; a program named `claude` or `codex` still gets that agent's flags |
-| `G8R_COLLECTOR` | event socket path (default `~/.g8r/g8r.sock`) |
-| `G8R_TSC` | explicit TypeScript 7 binary |
-| `G8R_SNAPSHOT=<png>` | render the window to a PNG after 2 s |
-| `G8R_DEBUG_DELEGATES=a,b` | open delegates at launch |
-| `G8R_DEBUG_COLLAPSED` / `G8R_DEBUG_TOGGLE` | collapse / round-trip delegate boxes |
+The language-server tests need TypeScript 7 in `~/.g8r/tools` and skip without it.
 
 ## Limitations
 
-- The map is a prototype: it scans Swift with regular expressions and is not yet part of the app.
-- The symbol and reference engines cover TypeScript, TSX and JavaScript.
-- Apple Silicon build of libghostty-vt only (`scripts/build-ghostty.sh`).
+- Apple Silicon only, and signed ad hoc.
+- Symbols are read for Swift, TypeScript and JavaScript only.
+- The map follows the active shell only while g8r is the frontmost app.
+- Build needs an agent started in a g8r shell during this run of the app.
+
+## Third-party notices
+
+g8r includes Ghostty (libghostty-vt), tree-sitter with its TypeScript and Swift grammars, SwiftTreeSitter, and the IBM Plex Mono font. Their licenses are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

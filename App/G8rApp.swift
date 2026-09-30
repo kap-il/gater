@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 import G8rCore
 import G8rTerminal
 
@@ -99,13 +100,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A snapshot run draws off to the side: it must not take the
         // keyboard from whatever the user is typing in.
         let env = ProcessInfo.processInfo.environment
-        if env["G8R_SNAPSHOT"] == nil && env["G8R_SNAPSHOT_MAP"] == nil {
+        if env["G8R_SNAPSHOT"] == nil && env["G8R_SNAPSHOT_MAP"] == nil && env["G8R_RECORD"] == nil {
             NSApp.activate(ignoringOtherApps: true)
         }
         scheduleDebugBuild()
         scheduleDebugSnapshot()
         scheduleMapSnapshot()
+        scheduleRecording()
     }
+
+    /// G8R_RECORD=<dir>: write numbered PNG frames of the window every
+    /// 80ms for G8R_RECORD_SECONDS (default 10), for demo GIFs. The map
+    /// tab is a web view, which `cacheDisplay` leaves blank, so its own
+    /// snapshot is drawn over it. G8R_RECORD_MAP_AT=<seconds> switches to
+    /// the map tab then. Like the snapshots, it never activates the app.
+    private func scheduleRecording() {
+        let env = ProcessInfo.processInfo.environment
+        guard let dir = env["G8R_RECORD"], !dir.isEmpty else { return }
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        windowController.window?.setContentSize(NSSize(width: 1200, height: 760))
+        let seconds = Double(env["G8R_RECORD_SECONDS"] ?? "") ?? 10
+        if let at = Double(env["G8R_RECORD_MAP_AT"] ?? "") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in self?.windowController.showMap() }
+        }
+        let start = Date()
+        var frame = 0
+        var busy = false
+        Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] timer in
+            guard let self, Date().timeIntervalSince(start) < seconds else { return timer.invalidate() }
+            guard !busy, let view = self.windowController.window?.contentView,
+                  let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            let path = (dir as NSString).appendingPathComponent(String(format: "%05d.png", frame))
+            frame += 1
+            let write = { try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path)) }
+            guard let web = self.mapController.view as? WKWebView, web.window != nil, !web.isHiddenOrHasHiddenAncestor
+            else { write(); return }
+            busy = true
+            let rect = web.convert(web.bounds, to: view)
+            web.takeSnapshot(with: nil) { image, _ in
+                if let image {
+                    NSGraphicsContext.saveGraphicsState()
+                    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+                    image.draw(in: rect)
+                    NSGraphicsContext.restoreGraphicsState()
+                }
+                write()
+                busy = false
+            }
+        }
+    }
+
+    private var recording: Bool { ProcessInfo.processInfo.environment["G8R_RECORD"] != nil }
 
     private func debugList(_ variable: String) -> [String] {
         (ProcessInfo.processInfo.environment[variable] ?? "")
@@ -366,7 +412,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Only a shell moves the root: delegate and build panes run in g8r's
     /// own worktrees.
     private func followActiveShell() {
-        guard NSApp.isActive, let pane = windowController?.activePane, pane.role == .shell,
+        guard NSApp.isActive || recording, let pane = windowController?.activePane, pane.role == .shell,
               let folder = pane.session.process.workingDirectory else { return }
         projectRoot.follow(folder: folder, pane: pane.id)
     }
